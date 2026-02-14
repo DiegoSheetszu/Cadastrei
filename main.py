@@ -1,88 +1,53 @@
 import json
-from datetime import date, datetime
-from decimal import Decimal
 
+from Cadastro_API.login import login_api
 from config.engine import ativar_engine
 from Consultas_dbo.afastamentos.afastamentos import RepositorioAfastamentos
+from Consultas_dbo.cadastro_motoristas.cadastro_motoristas import RepositorioCadastroMotoristas
+from Ferramentas.montar_payload_afastamentos import montar_payload_afastamentos
+from Ferramentas.montar_payload_motoristas import montar_payload_motoristas
 
 
-def _to_yyyy_mm_dd(value) -> str | None:
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.strftime("%Y-%m-%d")
-    if isinstance(value, date):
-        return value.strftime("%Y-%m-%d")
+def executar_fluxo_motoristas(engine):
+    repo = RepositorioCadastroMotoristas(engine)
+    registros = repo.buscar_dados_cadastro_motoristas(limit=1)
+    payload = montar_payload_motoristas(registros)
 
-    text = str(value).strip()
-    if not text:
-        return None
+    print(f"[Motoristas] Registros do banco: {len(registros)}")
+    print(f"[Motoristas] Registros prontos para API: {len(payload)}")
 
-    for fmt in ("%Y-%m-%d", "%Y-%m-%d %H:%M", "%Y-%m-%d %H:%M:%S"):
-        try:
-            return datetime.strptime(text, fmt).strftime("%Y-%m-%d")
-        except ValueError:
-            pass
-
-    return text[:10]
+    if payload:
+        print(json.dumps(payload[:1], ensure_ascii=False, indent=2, default=str))
+    else:
+        print("[Motoristas] Nenhum registro pronto para envio.")
 
 
-def _to_bool(value) -> bool:
-    if isinstance(value, bool):
-        return value
-    if value is None:
-        return False
-    if isinstance(value, (int, float, Decimal)):
-        return value != 0
+def executar_fluxo_afastamentos(engine):
+    repo = RepositorioAfastamentos(engine)
+    registros = repo.buscar_dados_afastamentos(limit=1)
+    payload = montar_payload_afastamentos(registros)
 
-    text = str(value).strip().lower()
-    return text in {"1", "true", "t", "sim", "s", "y", "yes"}
+    print(f"[Afastamentos] Registros do banco: {len(registros)}")
+    print(f"[Afastamentos] Registros prontos para API: {len(payload)}")
 
-
-def montar_payload_afastamentos(registros: list[dict]) -> list[dict]:
-    payload = []
-
-    for row in registros:
-        cpf = row.get("cpf") or row.get("CPF") or row.get("numcpf") or row.get("cpfcol")
-        if not cpf:
-            continue
-
-        descricao = str(row.get("obsafa") or row.get("sitafa") or "Afastamento")
-        sigla = str(row.get("sitafa") or "AFA")[:3]
-
-        item = {
-            "cpf": str(cpf),
-            "descricao": descricao,
-            "sigla": sigla,
-            "datainicio": _to_yyyy_mm_dd(row.get("datafa")),
-            "datatermino": _to_yyyy_mm_dd(row.get("datter")),
-            "rescisao": _to_bool(row.get("encafa")),
-            "codigoexterno": str(row.get("seqreg") or row.get("numpro") or ""),
-        }
-
-        if item["datainicio"]:
-            payload.append(item)
-
-    return payload
+    if payload:
+        print(json.dumps(payload[:1], ensure_ascii=False, indent=2, default=str))
+    else:
+        print("[Afastamentos] Nenhum registro pronto para envio.")
 
 
 def main():
-    database = "SOFTRAN_COMTRASIL"
-    engine = ativar_engine(database)
-
-    repo = RepositorioAfastamentos(engine)
-    afastamentos = repo.buscar_dados_afastamentos(limit=100)
-
-    payload = montar_payload_afastamentos(afastamentos)
-
-    print(f"Registros do banco: {len(afastamentos)}")
-    print(f"Registros prontos para API: {len(payload)}")
-
-    if not payload:
-        print("Nenhum registro pronto para envio. Verifique se a consulta retorna CPF.")
+    try:
+        auth = login_api()
+        print(f"Login realizado. Token expira em: {auth.get('exp')}")
+    except Exception as exc:
+        print(f"Falha no login da API: {exc}")
         return
 
-    print(json.dumps(payload[:5], ensure_ascii=False, indent=2, default=str))
+    engine = ativar_engine("Vetorh_Prod")
+
+    executar_fluxo_motoristas(engine)
+    executar_fluxo_afastamentos(engine)
 
 
 if __name__ == "__main__":

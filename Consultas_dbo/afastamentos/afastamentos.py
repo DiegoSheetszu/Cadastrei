@@ -7,7 +7,7 @@ class RepositorioAfastamentos:
     def __init__(self, engine: Engine):
         self.engine = engine
 
-    def buscar_dados_afastamentos(self, since: str | None = None, limit: int = 500) -> List[Dict[str, Any]]:
+    def buscar_dados_afastamentos(self, since: str | None = None, limit: int = 1) -> List[Dict[str, Any]]:
         with self.engine.connect() as conn:
             rows = conn.execute(
                 afastamentos,
