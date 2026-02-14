@@ -3,15 +3,20 @@ from Ferramentas.map_genero import map_genero
 from Ferramentas.to_yyyy_mm_dd import to_yyyy_mm_dd
 
 
-def _endereco_padrao() -> dict:
+def _text_or_default(value, default: str) -> str:
+    text = str(value).strip() if value is not None else ""
+    return text if text else default
+
+
+def _endereco_from_row(row: dict) -> dict:
     return {
-        "rua": "NAO INFORMADO",
-        "numero": "SN",
+        "rua": _text_or_default(row.get("logradouro"), "NAO INFORMADO"),
+        "numero": _text_or_default(row.get("numero"), "SN"),
         "complemento": "",
-        "bairro": "NAO INFORMADO",
-        "cidade": "NAO INFORMADO",
-        "uf": "SC",
-        "cep": "00000000",
+        "bairro": _text_or_default(row.get("bairro"), "NAO INFORMADO"),
+        "cidade": _text_or_default(row.get("cidade"), "NAO INFORMADO"),
+        "uf": _text_or_default(row.get("uf"), "SC"),
+        "cep": _text_or_default(row.get("cep"), "00000000"),
         "latitude": 0.0,
         "longitude": 0.0,
     }
@@ -33,7 +38,7 @@ def montar_payload_motoristas(registros: list[dict]) -> list[dict]:
             "cpf": cpf,
             "datanascimento": to_yyyy_mm_dd(row.get("datnas")),
             "genero": map_genero(row.get("tipsex")),
-            "endereco": _endereco_padrao(),
+            "endereco": _endereco_from_row(row),
             "dataadmissao": data_admissao,
             "matricula": str(row.get("numcad") or ""),
         }
@@ -41,3 +46,4 @@ def montar_payload_motoristas(registros: list[dict]) -> list[dict]:
         payload.append(item)
 
     return payload
+
