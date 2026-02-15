@@ -6,10 +6,10 @@ from tkinter.scrolledtext import ScrolledText
 
 from Cadastro_API.login import login_api
 from config.engine import ativar_engine
+from config.settings import settings
 from Consultas_dbo.afastamentos.afastamentos import RepositorioAfastamentos
-from Consultas_dbo.cadastro_motoristas.cadastro_motoristas import RepositorioCadastroMotoristas
 from Ferramentas.montar_payload_afastamentos import montar_payload_afastamentos
-from Ferramentas.montar_payload_motoristas import montar_payload_motoristas
+from src.integradora.motorista_sync_service import MotoristaSyncService
 
 
 class IntegracaoApp(tk.Tk):
@@ -19,10 +19,14 @@ class IntegracaoApp(tk.Tk):
         self.geometry("980x680")
         self.minsize(860, 560)
 
-        self.engine = None
+        self.engine_origem = None
+        self.engine_destino = None
+        self.database_origem_atual = None
+        self.database_destino_atual = None
         self.token = None
 
-        self.database_var = tk.StringVar(value="Vetorh_Prod")
+        self.database_var = tk.StringVar(value=settings.source_database_dev)
+        self.database_destino_var = tk.StringVar(value=settings.target_database)
         self.limit_var = tk.StringVar(value="1")
         self.status_var = tk.StringVar(value="Status: pronto")
 
@@ -34,18 +38,21 @@ class IntegracaoApp(tk.Tk):
 
         top = ttk.Frame(self, padding=12)
         top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(7, weight=1)
+        top.columnconfigure(9, weight=1)
 
-        ttk.Label(top, text="Database:").grid(row=0, column=0, sticky="w")
+        ttk.Label(top, text="Origem:").grid(row=0, column=0, sticky="w")
         ttk.Entry(top, textvariable=self.database_var, width=24).grid(row=0, column=1, padx=(6, 14), sticky="w")
 
         ttk.Label(top, text="Limite:").grid(row=0, column=2, sticky="w")
         ttk.Entry(top, textvariable=self.limit_var, width=8).grid(row=0, column=3, padx=(6, 14), sticky="w")
 
-        ttk.Button(top, text="Login", command=lambda: self._run_async(self._login)).grid(row=0, column=4, padx=(0, 8))
-        ttk.Button(top, text="Motoristas", command=lambda: self._run_async(self._executar_motoristas)).grid(row=0, column=5, padx=(0, 8))
-        ttk.Button(top, text="Afastamentos", command=lambda: self._run_async(self._executar_afastamentos)).grid(row=0, column=6, padx=(0, 8))
-        ttk.Button(top, text="Executar ambos", command=lambda: self._run_async(self._executar_ambos)).grid(row=0, column=7, sticky="w")
+        ttk.Label(top, text="Destino:").grid(row=0, column=4, sticky="w")
+        ttk.Entry(top, textvariable=self.database_destino_var, width=18).grid(row=0, column=5, padx=(6, 14), sticky="w")
+
+        ttk.Button(top, text="Login", command=lambda: self._run_async(self._login)).grid(row=0, column=6, padx=(0, 8))
+        ttk.Button(top, text="Motoristas", command=lambda: self._run_async(self._executar_motoristas)).grid(row=0, column=7, padx=(0, 8))
+        ttk.Button(top, text="Afastamentos", command=lambda: self._run_async(self._executar_afastamentos)).grid(row=0, column=8, padx=(0, 8))
+        ttk.Button(top, text="Executar ambos", command=lambda: self._run_async(self._executar_ambos)).grid(row=0, column=9, sticky="w")
 
         ttk.Label(self, textvariable=self.status_var, padding=(12, 0, 12, 8)).grid(row=1, column=0, sticky="w")
 
@@ -92,9 +99,26 @@ class IntegracaoApp(tk.Tk):
         except Exception:
             return 1
 
-    def _ensure_engine(self):
-        if self.engine is None:
-            self.engine = ativar_engine(self.database_var.get().strip() or "Vetorh_Prod")
+    def _database_origem(self) -> str:
+        return self.database_var.get().strip() or settings.source_database_dev
+
+    def _database_destino(self) -> str:
+        return self.database_destino_var.get().strip() or settings.target_database
+
+    def _schema_origem(self) -> str:
+        return settings.source_schema_for_database(self._database_origem())
+
+    def _ensure_engine_origem(self):
+        database = self._database_origem()
+        if self.engine_origem is None or self.database_origem_atual != database:
+            self.engine_origem = ativar_engine(database)
+            self.database_origem_atual = database
+
+    def _ensure_engine_destino(self):
+        database = self._database_destino()
+        if self.engine_destino is None or self.database_destino_atual != database:
+            self.engine_destino = ativar_engine(database)
+            self.database_destino_atual = database
 
     def _login(self):
         self._set_status("Status: autenticando...")
@@ -106,25 +130,45 @@ class IntegracaoApp(tk.Tk):
 
     def _executar_motoristas(self):
         self._set_status("Status: executando motoristas...")
-        self._ensure_engine()
+        self._ensure_engine_origem()
+        self._ensure_engine_destino()
 
-        repo = RepositorioCadastroMotoristas(self.engine)
-        registros = repo.buscar_dados_cadastro_motoristas(limit=self._get_limit())
-        payload = montar_payload_motoristas(registros)
+        schema_origem = self._schema_origem()
+        batch_size = self._get_limit()
 
-        self._log(f"[Motoristas] Banco: {len(registros)}")
-        self._log(f"[Motoristas] Payload: {len(payload)}")
-        self._log(json.dumps(payload[:1], ensure_ascii=False, indent=2, default=str) if payload else "[Motoristas] Sem payload")
+        service = MotoristaSyncService(
+            engine_origem=self.engine_origem,
+            engine_destino=self.engine_destino,
+            database_origem=self._database_origem(),
+            schema_origem=schema_origem,
+            schema_destino=settings.target_schema,
+            tabela_destino=settings.target_motorista_table,
+            batch_size=batch_size,
+        )
+        resultado = service.executar_ciclo()
+
+        self._log(f"[Motoristas] Origem: {self._database_origem()} ({schema_origem})")
+        self._log(f"[Motoristas] Destino: {self._database_destino()}.{settings.target_schema}.{settings.target_motorista_table}")
+        self._log(f"[Motoristas] Alterados R034FUN: {resultado.alterados_fun}")
+        self._log(f"[Motoristas] Alterados R034CPL: {resultado.alterados_cpl}")
+        self._log(f"[Motoristas] NumCad processados: {resultado.numcads_processados}")
+        self._log(f"[Motoristas] Registros origem: {resultado.registros_origem}")
+        self._log(f"[Motoristas] Payloads validos: {resultado.payloads_validos}")
+        self._log(f"[Motoristas] Eventos gerados: {resultado.eventos_gerados}")
+        self._log(f"[Motoristas] Eventos inseridos: {resultado.eventos_inseridos}")
         self._set_status("Status: motoristas finalizado")
 
     def _executar_afastamentos(self):
         self._set_status("Status: executando afastamentos...")
-        self._ensure_engine()
+        self._ensure_engine_origem()
 
-        repo = RepositorioAfastamentos(self.engine)
+        schema_origem = self._schema_origem()
+
+        repo = RepositorioAfastamentos(self.engine_origem, schema_origem=schema_origem)
         registros = repo.buscar_dados_afastamentos(limit=self._get_limit())
         payload = montar_payload_afastamentos(registros)
 
+        self._log(f"[Afastamentos] Origem: {self._database_origem()} ({schema_origem})")
         self._log(f"[Afastamentos] Banco: {len(registros)}")
         self._log(f"[Afastamentos] Payload: {len(payload)}")
         self._log(json.dumps(payload[:1], ensure_ascii=False, indent=2, default=str) if payload else "[Afastamentos] Sem payload")
