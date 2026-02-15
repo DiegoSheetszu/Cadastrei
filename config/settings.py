@@ -8,11 +8,31 @@ import os
 def _resolver_base_dir() -> Path:
     if getattr(sys, "frozen", False):
         exe_dir = Path(sys.executable).resolve().parent
-        if (exe_dir / ".env").exists():
-            return exe_dir
-        if (exe_dir.parent / ".env").exists():
-            return exe_dir.parent
-        return exe_dir
+
+        candidatos: list[Path] = []
+        vistos: set[Path] = set()
+
+        def _add(path: Path) -> None:
+            p = path.resolve()
+            if p not in vistos:
+                vistos.add(p)
+                candidatos.append(p)
+
+        # 1) AppDirectory configurado no NSSM costuma ser o cwd do processo.
+        _add(Path.cwd())
+        # 2) Pasta do executavel.
+        _add(exe_dir)
+        # 3) Pais da pasta do executavel (ate a raiz), para suportar layout:
+        # C:\Cadastrei\apps\prod\CadastreiMotoristasProd\CadastreiMotoristasProd.exe
+        for parent in exe_dir.parents:
+            _add(parent)
+
+        for base in candidatos:
+            if (base / ".env").exists():
+                return base
+
+        # Fallback final para manter previsibilidade em ambiente frozen.
+        return Path.cwd()
     return Path(__file__).resolve().parents[1]
 
 

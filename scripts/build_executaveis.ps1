@@ -2,7 +2,8 @@ param(
     [string]$DestinoRaiz = "C:\Cadastrei",
     [ValidateSet("Todos", "Producao", "Homologacao")]
     [string]$Ambiente = "Todos",
-    [switch]$IncluirInterface
+    [switch]$IncluirInterface,
+    [switch]$NaoPararProcessos
 )
 
 $ErrorActionPreference = "Stop"
@@ -37,6 +38,70 @@ if ($LASTEXITCODE -ne 0) {
     & $python -m pip install pyinstaller
 }
 
+function Ensure-PythonModule {
+    param(
+        [Parameter(Mandatory = $true)][string]$ModuleName
+    )
+    & $python -m pip show $ModuleName | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "Instalando dependencia ausente: $ModuleName"
+        & $python -m pip install $ModuleName
+        if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao instalar modulo $ModuleName no virtualenv."
+        }
+    }
+}
+
+# Dependencias minimas para os executaveis de servico.
+Ensure-PythonModule -ModuleName "sqlalchemy"
+Ensure-PythonModule -ModuleName "pyodbc"
+Ensure-PythonModule -ModuleName "pydantic"
+Ensure-PythonModule -ModuleName "python-dotenv"
+if ($IncluirInterface) {
+    Ensure-PythonModule -ModuleName "httpx"
+}
+
+function Stop-TargetProcessIfRunning {
+    param(
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($NaoPararProcessos) {
+        return
+    }
+
+    $procs = Get-Process -Name $Name -ErrorAction SilentlyContinue
+    if ($procs) {
+        Write-Host "Encerrando processo em execucao: $Name"
+        $procs | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 1
+    }
+}
+
+function Remove-TargetDirWithRetry {
+    param(
+        [Parameter(Mandatory = $true)][string]$DistPath,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $targetDir = Join-Path $DistPath $Name
+    if (-not (Test-Path $targetDir)) {
+        return
+    }
+
+    for ($tentativa = 1; $tentativa -le 8; $tentativa++) {
+        try {
+            Remove-Item $targetDir -Recurse -Force -ErrorAction Stop
+            return
+        } catch {
+            Stop-TargetProcessIfRunning -Name $Name
+            Start-Sleep -Milliseconds 800
+        }
+    }
+
+    throw "Nao foi possivel limpar a pasta de build '$targetDir'. Feche o executavel em uso e tente novamente."
+}
+
 function Invoke-BuildTarget {
     param(
         [Parameter(Mandatory = $true)][string]$Name,
@@ -50,6 +115,9 @@ function Invoke-BuildTarget {
         throw "Script de entrada nao encontrado: $scriptPath"
     }
 
+    Stop-TargetProcessIfRunning -Name $Name
+    Remove-TargetDirWithRetry -DistPath $DistPath -Name $Name
+
     $cmd = @(
         "-m", "PyInstaller",
         "--noconfirm",
@@ -59,11 +127,26 @@ function Invoke-BuildTarget {
         "--distpath", $DistPath,
         "--workpath", $workPath,
         "--specpath", $specPath,
-        "--paths", $repo
+        "--paths", $repo,
+        "--hidden-import", "pyodbc",
+        "--hidden-import", "sqlalchemy.dialects.mssql.pyodbc",
+        "--collect-binaries", "pyodbc"
     )
 
     if ($Windowed) {
         $cmd += "--windowed"
+        $cmd += "--hidden-import"
+        $cmd += "httpx"
+        $cmd += "--hidden-import"
+        $cmd += "httpcore"
+        $cmd += "--hidden-import"
+        $cmd += "anyio"
+        $cmd += "--hidden-import"
+        $cmd += "sniffio"
+        $cmd += "--hidden-import"
+        $cmd += "certifi"
+        $cmd += "--hidden-import"
+        $cmd += "idna"
     }
     $cmd += $scriptPath
 
@@ -96,14 +179,54 @@ $envDestino = Join-Path $DestinoRaiz ".env"
 if (Test-Path $envOrigem) {
     Copy-Item $envOrigem $envDestino -Force
     Write-Host "Arquivo .env copiado para $envDestino"
+
+    $targetsEnv = @()
+    if ($buildProd) {
+        $targetsEnv += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env")
+        $targetsEnv += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env")
+    }
+    if ($buildHom) {
+        $targetsEnv += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env")
+        $targetsEnv += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env")
+    }
+    if ($IncluirInterface) {
+        $targetsEnv += (Join-Path $appsUiPath "CadastreiInterface\.env")
+    }
+
+    foreach ($target in $targetsEnv) {
+        $targetDir = Split-Path -Parent $target
+        if (Test-Path $targetDir) {
+            Copy-Item $envOrigem $target -Force
+        }
+    }
 } else {
-Write-Host "Arquivo .env nao encontrado no repositorio. Copie manualmente para $envDestino"
+    Write-Host "Arquivo .env nao encontrado no repositorio. Copie manualmente para $envDestino"
 }
 
 $envExampleOrigem = Join-Path $repo ".env.example"
 $envExampleDestino = Join-Path $DestinoRaiz ".env.example"
 if (Test-Path $envExampleOrigem) {
     Copy-Item $envExampleOrigem $envExampleDestino -Force
+
+    $targetsEnvExample = @()
+    if ($buildProd) {
+        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env.example")
+        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env.example")
+    }
+    if ($buildHom) {
+        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env.example")
+        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env.example")
+    }
+    if ($IncluirInterface) {
+        $targetsEnvExample += (Join-Path $appsUiPath "CadastreiInterface\.env.example")
+    }
+
+    foreach ($target in $targetsEnvExample) {
+        $targetDir = Split-Path -Parent $target
+        if (Test-Path $targetDir) {
+            Copy-Item $envExampleOrigem $target -Force
+        }
+    }
 }
 
 $installScriptOrigem = Join-Path $repo "scripts\instalar_servicos_nssm.ps1"
