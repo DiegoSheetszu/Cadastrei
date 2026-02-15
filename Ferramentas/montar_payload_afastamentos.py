@@ -8,18 +8,26 @@ def montar_payload_afastamentos(registros: list[dict]) -> list[dict]:
 
     for row in registros:
         cpf = format_cpf(row.get("numcpf") or row.get("cpf") or row.get("CPF") or row.get("cpfcol"))
-        if not cpf:
-            continue
+        datainicio = to_yyyy_mm_dd(row.get("datafa"))
+        descricao_situacao = str(row.get("dessit") or "").strip()
 
         item = {
+            "numerodaempresa": row.get("numemp"),
+            "tipodecolaborador": row.get("tipcol"),
+            "numerodeorigemdocolaborador": row.get("numcad"),
             "cpf": cpf,
-            "descricao": str(row.get("obsafa") or row.get("sitafa") or "Afastamento"),
-            "datainicio": to_yyyy_mm_dd(row.get("datafa")),
+            "descricao": str(row.get("obsafa") or descricao_situacao or row.get("sitafa") or "Afastamento"),
+            "descricaodasituacao": descricao_situacao or None,
+            "datainicio": datainicio,
+            "dataafastamento": datainicio,
+            "horadoafastamento": row.get("horafa"),
             "datatermino": to_yyyy_mm_dd(row.get("datter")),
+            "horadotermino": row.get("horter"),
+            "situacao": row.get("sitafa"),
             "rescisao": to_bool(row.get("encafa")),
         }
 
-        if item["datainicio"]:
+        if item["datainicio"] and item["numerodeorigemdocolaborador"] is not None:
             payload.append(item)
 
     return payload

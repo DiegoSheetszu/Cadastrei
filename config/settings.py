@@ -1,9 +1,22 @@
 from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 from pathlib import Path
+import sys
 import os
 
-BASE_DIR = Path(__file__).resolve().parents[1]
+
+def _resolver_base_dir() -> Path:
+    if getattr(sys, "frozen", False):
+        exe_dir = Path(sys.executable).resolve().parent
+        if (exe_dir / ".env").exists():
+            return exe_dir
+        if (exe_dir.parent / ".env").exists():
+            return exe_dir.parent
+        return exe_dir
+    return Path(__file__).resolve().parents[1]
+
+
+BASE_DIR = _resolver_base_dir()
 ENV_PATH = BASE_DIR / ".env"
 
 load_dotenv(dotenv_path=ENV_PATH, override=False)
@@ -31,8 +44,16 @@ class Settings(BaseModel):
     target_database: str = Field(default="Cadastrei", alias="TARGET_DATABASE")
     target_schema: str = Field(default="dbo", alias="TARGET_SCHEMA")
     target_motorista_table: str = Field(default="MotoristaCadastro", alias="TARGET_MOTORISTA_TABLE")
+    target_afastamento_table: str = Field(default="Afastamento", alias="TARGET_AFASTAMENTO_TABLE")
     motorista_sync_interval_seconds: int = Field(default=30, alias="MOTORISTA_SYNC_INTERVAL_SECONDS")
     motorista_sync_batch_size: int = Field(default=500, alias="MOTORISTA_SYNC_BATCH_SIZE")
+    afastamento_sync_interval_seconds: int = Field(default=30, alias="AFASTAMENTO_SYNC_INTERVAL_SECONDS")
+    afastamento_sync_batch_size: int = Field(default=500, alias="AFASTAMENTO_SYNC_BATCH_SIZE")
+    afastamento_sync_data_inicio: str = Field(default="", alias="AFASTAMENTO_SYNC_DATA_INICIO")
+    win_service_motoristas_dev: str = Field(default="CadastreiMotoristasHom", alias="WIN_SERVICE_MOTORISTAS_DEV")
+    win_service_motoristas_prod: str = Field(default="CadastreiMotoristasProd", alias="WIN_SERVICE_MOTORISTAS_PROD")
+    win_service_afastamentos_dev: str = Field(default="CadastreiAfastamentosHom", alias="WIN_SERVICE_AFASTAMENTOS_DEV")
+    win_service_afastamentos_prod: str = Field(default="CadastreiAfastamentosProd", alias="WIN_SERVICE_AFASTAMENTOS_PROD")
 
     def databases(self) -> list[str]:
         return [x.strip() for x in self.db_databases.split(",") if x.strip()]

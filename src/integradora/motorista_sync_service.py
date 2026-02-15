@@ -201,11 +201,14 @@ class MotoristaSyncService:
         *,
         intervalo_segundos: int,
         logger: Callable[[str], None] | None = None,
+        stop_event: Any | None = None,
     ) -> None:
         intervalo = max(1, int(intervalo_segundos))
         sink = logger or (lambda _: None)
 
         while True:
+            if stop_event is not None and stop_event.is_set():
+                break
             inicio = time.time()
             try:
                 resultado = self.executar_ciclo()
@@ -226,7 +229,11 @@ class MotoristaSyncService:
             elapsed = time.time() - inicio
             sleep_for = intervalo - elapsed
             if sleep_for > 0:
-                time.sleep(sleep_for)
+                if stop_event is not None:
+                    if stop_event.wait(sleep_for):
+                        break
+                else:
+                    time.sleep(sleep_for)
 
     def _salvar_checkpoints(
         self,

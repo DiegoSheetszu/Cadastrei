@@ -3,6 +3,10 @@ import re
 from sqlalchemy import text
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_SITUACOES_AFASTAMENTO_PERMITIDAS = (
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 17, 18, 20, 22, 23,
+    24, 26, 27, 28, 29, 30, 37, 77, 78, 209, 506, 507, 510, 511, 512,
+)
 
 
 def _quoted_identifier(name: str, label: str) -> str:
@@ -16,16 +20,29 @@ def _table(schema: str, table_name: str) -> str:
     return f"{_quoted_identifier(schema, 'Schema')}.{_quoted_identifier(table_name, 'Tabela')}"
 
 
-def montar_query_afastamentos(schema_origem: str):
+def _sql_afastamentos(
+    schema_origem: str,
+    top_clause: str,
+    where_clause: str = "",
+    order_desc: bool = True,
+) -> str:
     r038afa = _table(schema_origem, "R038AFA")
     r034fun = _table(schema_origem, "R034FUN")
+    r010sit = _table(schema_origem, "R010SIT")
+    where_extra = f"\n        WHERE {where_clause}" if where_clause else ""
+    order_by = (
+        "ORDER BY a.[datafa] DESC, a.[horafa] DESC, a.[seqreg] DESC"
+        if order_desc
+        else "ORDER BY a.[numemp] ASC, a.[tipcol] ASC, a.[numcad] ASC, a.[datafa] ASC, COALESCE(a.[horafa], 0) ASC, COALESCE(a.[seqreg], 0) ASC"
+    )
 
-    return text(f"""
-        SELECT TOP (:limit)
+    return f"""
+        SELECT {top_clause}
             a.[numemp],
             a.[tipcol],
             a.[numcad],
             f.[numcpf],
+            s.[dessit],
             a.[datafa],
             a.[horafa],
             a.[datter],
@@ -83,18 +100,97 @@ def montar_query_afastamentos(schema_origem: str):
             a.[mancgc],
             a.[manrem],
             a.[codcid],
-            a.[indrem],
-            a.[cfjsuc],
-            a.[cfjces],
-            a.[cfjsin],
-            a.[cfjmdt]
+            a.[indrem]
         FROM {r038afa} AS a
         INNER JOIN {r034fun} AS f
             ON f.[numemp] = a.[numemp]
             AND f.[tipcol] = a.[tipcol]
             AND f.[numcad] = a.[numcad]
-        ORDER BY a.[datafa] DESC, a.[horafa] DESC, a.[seqreg] DESC
-    """)
+        LEFT JOIN {r010sit} AS s
+            ON s.[codsit] = a.[sitafa]
+        {where_extra}
+        {order_by}
+    """
+
+
+def _filtro_data_afastamentos() -> str:
+    # Em Vetorh, datalt frequentemente vem como data sentinela (1900-12-31).
+    # Quando isso ocorrer, usamos datafa para o corte por data.
+    return """
+    CAST(
+        CASE
+            WHEN a.[datalt] IS NULL OR a.[datalt] < '1901-01-01'
+                THEN a.[datafa]
+            ELSE a.[datalt]
+        END
+        AS DATE
+    ) >= :data_inicio
+    """
+
+
+def _filtro_situacoes_afastamentos() -> str:
+    situacoes = ", ".join(str(codigo) for codigo in _SITUACOES_AFASTAMENTO_PERMITIDAS)
+    return f"a.[sitafa] IN ({situacoes})"
+
+
+def montar_query_afastamentos(schema_origem: str):
+    where_clause = f"{_filtro_data_afastamentos()} AND {_filtro_situacoes_afastamentos()}"
+    return text(
+        _sql_afastamentos(
+            schema_origem,
+            top_clause="TOP (:limit)",
+            where_clause=where_clause,
+            order_desc=True,
+        )
+    )
+
+
+def montar_query_afastamentos_por_cursor(schema_origem: str):
+    where_clause = f"""
+    {_filtro_data_afastamentos()}
+    AND {_filtro_situacoes_afastamentos()}
+    AND (
+        a.[numemp] > :c_numemp
+        OR (
+            a.[numemp] = :c_numemp
+            AND a.[tipcol] > :c_tipcol
+        )
+        OR (
+            a.[numemp] = :c_numemp
+            AND a.[tipcol] = :c_tipcol
+            AND a.[numcad] > :c_numcad
+        )
+        OR (
+            a.[numemp] = :c_numemp
+            AND a.[tipcol] = :c_tipcol
+            AND a.[numcad] = :c_numcad
+            AND a.[datafa] > :c_datafa
+        )
+        OR (
+            a.[numemp] = :c_numemp
+            AND a.[tipcol] = :c_tipcol
+            AND a.[numcad] = :c_numcad
+            AND a.[datafa] = :c_datafa
+            AND COALESCE(a.[horafa], 0) > :c_horafa
+        )
+        OR (
+            a.[numemp] = :c_numemp
+            AND a.[tipcol] = :c_tipcol
+            AND a.[numcad] = :c_numcad
+            AND a.[datafa] = :c_datafa
+            AND COALESCE(a.[horafa], 0) = :c_horafa
+            AND COALESCE(a.[seqreg], 0) > :c_seqreg
+        )
+    )
+    """
+    return text(
+        _sql_afastamentos(
+            schema_origem,
+            top_clause="TOP (:limit)",
+            where_clause=where_clause,
+            order_desc=False,
+        )
+    )
 
 
 def _sql_cadastro_motoristas(schema_origem: str, top_clause: str, where_clause: str = "") -> str:

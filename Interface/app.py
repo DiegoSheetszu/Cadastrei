@@ -1,5 +1,6 @@
-import json
+import subprocess
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
@@ -7,8 +8,7 @@ from tkinter.scrolledtext import ScrolledText
 from Cadastro_API.login import login_api
 from config.engine import ativar_engine
 from config.settings import settings
-from Consultas_dbo.afastamentos.afastamentos import RepositorioAfastamentos
-from Ferramentas.montar_payload_afastamentos import montar_payload_afastamentos
+from src.integradora.afastamento_sync_service import AfastamentoSyncService
 from src.integradora.motorista_sync_service import MotoristaSyncService
 
 
@@ -18,19 +18,34 @@ class IntegracaoApp(tk.Tk):
         self.title("Integracao ATS - Execucao API")
         self.geometry("980x680")
         self.minsize(860, 560)
+        self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
 
         self.engine_origem = None
         self.engine_destino = None
         self.database_origem_atual = None
         self.database_destino_atual = None
         self.token = None
+        self.thread_servico_motoristas: threading.Thread | None = None
+        self.thread_servico_afastamentos: threading.Thread | None = None
+        self.stop_servico_motoristas: threading.Event | None = None
+        self.stop_servico_afastamentos: threading.Event | None = None
+        self._closing = False
 
         self.database_var = tk.StringVar(value=settings.source_database_dev)
         self.database_destino_var = tk.StringVar(value=settings.target_database)
         self.limit_var = tk.StringVar(value="1")
+        self.ambiente_var = tk.StringVar(value=self._ambiente_por_database(self.database_var.get()))
+        self.intervalo_motoristas_var = tk.StringVar(value=str(settings.motorista_sync_interval_seconds))
+        self.intervalo_afastamentos_var = tk.StringVar(value=str(settings.afastamento_sync_interval_seconds))
+        win_m, win_a = self._nomes_servicos_windows_por_ambiente(self.ambiente_var.get())
+        self.win_service_motoristas_var = tk.StringVar(value=win_m)
+        self.win_service_afastamentos_var = tk.StringVar(value=win_a)
         self.status_var = tk.StringVar(value="Status: pronto")
+        self.servicos_status_var = tk.StringVar(value="Servicos: motoristas=OFF afastamentos=OFF")
+        self.windows_services_status_var = tk.StringVar(value="Windows: motoristas=? afastamentos=?")
 
         self._build_ui()
+        self.after(200, lambda: self._run_async(self._atualizar_status_windows_services))
 
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
@@ -38,21 +53,57 @@ class IntegracaoApp(tk.Tk):
 
         top = ttk.Frame(self, padding=12)
         top.grid(row=0, column=0, sticky="ew")
-        top.columnconfigure(9, weight=1)
+        top.columnconfigure(14, weight=1)
 
-        ttk.Label(top, text="Origem:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(top, textvariable=self.database_var, width=24).grid(row=0, column=1, padx=(6, 14), sticky="w")
+        ttk.Label(top, text="Ambiente:").grid(row=0, column=0, sticky="w")
+        ambiente_combo = ttk.Combobox(
+            top,
+            textvariable=self.ambiente_var,
+            values=("Homologacao", "Producao"),
+            state="readonly",
+            width=14,
+        )
+        ambiente_combo.grid(row=0, column=1, padx=(6, 8), sticky="w")
+        ttk.Button(top, text="Aplicar ambiente", command=self._aplicar_ambiente).grid(
+            row=0, column=2, padx=(0, 14), sticky="w"
+        )
 
-        ttk.Label(top, text="Limite:").grid(row=0, column=2, sticky="w")
-        ttk.Entry(top, textvariable=self.limit_var, width=8).grid(row=0, column=3, padx=(6, 14), sticky="w")
+        ttk.Label(top, text="Origem:").grid(row=0, column=3, sticky="w")
+        ttk.Entry(top, textvariable=self.database_var, width=16).grid(row=0, column=4, padx=(6, 14), sticky="w")
 
-        ttk.Label(top, text="Destino:").grid(row=0, column=4, sticky="w")
-        ttk.Entry(top, textvariable=self.database_destino_var, width=18).grid(row=0, column=5, padx=(6, 14), sticky="w")
+        ttk.Label(top, text="Destino:").grid(row=0, column=5, sticky="w")
+        ttk.Entry(top, textvariable=self.database_destino_var, width=14).grid(row=0, column=6, padx=(6, 14), sticky="w")
 
-        ttk.Button(top, text="Login", command=lambda: self._run_async(self._login)).grid(row=0, column=6, padx=(0, 8))
-        ttk.Button(top, text="Motoristas", command=lambda: self._run_async(self._executar_motoristas)).grid(row=0, column=7, padx=(0, 8))
-        ttk.Button(top, text="Afastamentos", command=lambda: self._run_async(self._executar_afastamentos)).grid(row=0, column=8, padx=(0, 8))
-        ttk.Button(top, text="Executar ambos", command=lambda: self._run_async(self._executar_ambos)).grid(row=0, column=9, sticky="w")
+        ttk.Label(top, text="Lote:").grid(row=0, column=7, sticky="w")
+        ttk.Entry(top, textvariable=self.limit_var, width=6).grid(row=0, column=8, padx=(6, 14), sticky="w")
+
+        ttk.Button(top, text="Login", command=lambda: self._run_async(self._login)).grid(row=0, column=9, padx=(0, 8))
+        ttk.Button(top, text="Motoristas", command=lambda: self._run_async(self._executar_motoristas)).grid(row=0, column=10, padx=(0, 8))
+        ttk.Button(top, text="Afastamentos", command=lambda: self._run_async(self._executar_afastamentos)).grid(row=0, column=11, padx=(0, 8))
+        ttk.Button(top, text="Executar ambos", command=lambda: self._run_async(self._executar_ambos)).grid(row=0, column=12, sticky="w")
+
+        ttk.Label(top, text="Int. M(s):").grid(row=1, column=0, pady=(10, 0), sticky="w")
+        ttk.Entry(top, textvariable=self.intervalo_motoristas_var, width=6).grid(row=1, column=1, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Label(top, text="Int. A(s):").grid(row=1, column=2, pady=(10, 0), sticky="w")
+        ttk.Entry(top, textvariable=self.intervalo_afastamentos_var, width=6).grid(row=1, column=3, pady=(10, 0), padx=(6, 14), sticky="w")
+
+        ttk.Button(top, text="Iniciar M", command=lambda: self._run_async(self._iniciar_servico_motoristas)).grid(row=1, column=4, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Parar M", command=self._parar_servico_motoristas).grid(row=1, column=5, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Iniciar A", command=lambda: self._run_async(self._iniciar_servico_afastamentos)).grid(row=1, column=6, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Parar A", command=self._parar_servico_afastamentos).grid(row=1, column=7, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Iniciar ambos", command=lambda: self._run_async(self._iniciar_servicos)).grid(row=1, column=8, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Parar ambos", command=self._parar_servicos).grid(row=1, column=9, pady=(10, 0), padx=(0, 8))
+        ttk.Label(top, textvariable=self.servicos_status_var).grid(row=1, column=10, columnspan=4, pady=(10, 0), sticky="w")
+
+        ttk.Label(top, text="WinSvc M:").grid(row=2, column=0, pady=(10, 0), sticky="w")
+        ttk.Entry(top, textvariable=self.win_service_motoristas_var, width=26).grid(row=2, column=1, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Label(top, text="WinSvc A:").grid(row=2, column=4, pady=(10, 0), sticky="w")
+        ttk.Entry(top, textvariable=self.win_service_afastamentos_var, width=26).grid(row=2, column=5, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Button(top, text="Status WinSvc", command=lambda: self._run_async(self._atualizar_status_windows_services)).grid(row=2, column=8, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Iniciar WinSvc", command=lambda: self._run_async(self._iniciar_windows_services)).grid(row=2, column=9, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Parar WinSvc", command=lambda: self._run_async(self._parar_windows_services)).grid(row=2, column=10, pady=(10, 0), padx=(0, 8))
+        ttk.Button(top, text="Reiniciar WinSvc", command=lambda: self._run_async(self._reiniciar_windows_services)).grid(row=2, column=11, pady=(10, 0), padx=(0, 8))
+        ttk.Label(top, textvariable=self.windows_services_status_var).grid(row=2, column=12, columnspan=3, pady=(10, 0), sticky="w")
 
         ttk.Label(self, textvariable=self.status_var, padding=(12, 0, 12, 8)).grid(row=1, column=0, sticky="w")
 
@@ -83,14 +134,25 @@ class IntegracaoApp(tk.Tk):
         self.output_text.delete("1.0", tk.END)
 
     def _log(self, message: str) -> None:
+        if self._closing:
+            return
+
         def _append():
             self.output_text.insert(tk.END, f"{message}\n")
             self.output_text.see(tk.END)
 
-        self.after(0, _append)
+        try:
+            self.after(0, _append)
+        except tk.TclError:
+            pass
 
     def _set_status(self, text: str) -> None:
-        self.after(0, lambda: self.status_var.set(text))
+        if self._closing:
+            return
+        try:
+            self.after(0, lambda: self.status_var.set(text))
+        except tk.TclError:
+            pass
 
     def _get_limit(self) -> int:
         try:
@@ -98,6 +160,18 @@ class IntegracaoApp(tk.Tk):
             return max(1, value)
         except Exception:
             return 1
+
+    def _get_intervalo_motoristas(self) -> int:
+        try:
+            return max(1, int(self.intervalo_motoristas_var.get().strip()))
+        except Exception:
+            return max(1, int(settings.motorista_sync_interval_seconds))
+
+    def _get_intervalo_afastamentos(self) -> int:
+        try:
+            return max(1, int(self.intervalo_afastamentos_var.get().strip()))
+        except Exception:
+            return max(1, int(settings.afastamento_sync_interval_seconds))
 
     def _database_origem(self) -> str:
         return self.database_var.get().strip() or settings.source_database_dev
@@ -108,11 +182,54 @@ class IntegracaoApp(tk.Tk):
     def _schema_origem(self) -> str:
         return settings.source_schema_for_database(self._database_origem())
 
+    def _ambiente_por_database(self, database: str) -> str:
+        db = (database or "").strip().lower()
+        if db == settings.source_database_prod.lower():
+            return "Producao"
+        return "Homologacao"
+
+    def _database_por_ambiente(self, ambiente: str) -> str:
+        if (ambiente or "").strip().lower() == "producao":
+            return settings.source_database_prod
+        return settings.source_database_dev
+
+    def _nomes_servicos_windows_por_ambiente(self, ambiente: str) -> tuple[str, str]:
+        if (ambiente or "").strip().lower() == "producao":
+            return (
+                settings.win_service_motoristas_prod,
+                settings.win_service_afastamentos_prod,
+            )
+        return (
+            settings.win_service_motoristas_dev,
+            settings.win_service_afastamentos_dev,
+        )
+
+    def _aplicar_ambiente(self) -> None:
+        if self._servicos_ativos():
+            self._log("Pare os servicos continuos antes de trocar o ambiente.")
+            return
+        ambiente = self.ambiente_var.get()
+        db_origem = self._database_por_ambiente(self.ambiente_var.get())
+        svc_m, svc_a = self._nomes_servicos_windows_por_ambiente(ambiente)
+        self.database_var.set(db_origem)
+        self.win_service_motoristas_var.set(svc_m)
+        self.win_service_afastamentos_var.set(svc_a)
+        if self.engine_origem is not None:
+            try:
+                self.engine_origem.dispose()
+            except Exception:
+                pass
+        self.engine_origem = None
+        self.database_origem_atual = None
+        self._set_status(f"Status: ambiente aplicado ({ambiente})")
+        self._log(f"Ambiente aplicado. Origem={db_origem}, WinSvc M={svc_m}, WinSvc A={svc_a}.")
+
     def _ensure_engine_origem(self):
         database = self._database_origem()
         if self.engine_origem is None or self.database_origem_atual != database:
             self.engine_origem = ativar_engine(database)
             self.database_origem_atual = database
+        self.ambiente_var.set(self._ambiente_por_database(database))
 
     def _ensure_engine_destino(self):
         database = self._database_destino()
@@ -129,6 +246,9 @@ class IntegracaoApp(tk.Tk):
         self._log(f"Login ok. Expira em: {exp}")
 
     def _executar_motoristas(self):
+        if self._motoristas_ativo():
+            self._log("Servico continuo de motoristas esta ativo. Pare o servico para executar manualmente.")
+            return
         self._set_status("Status: executando motoristas...")
         self._ensure_engine_origem()
         self._ensure_engine_destino()
@@ -159,24 +279,274 @@ class IntegracaoApp(tk.Tk):
         self._set_status("Status: motoristas finalizado")
 
     def _executar_afastamentos(self):
+        if self._afastamentos_ativo():
+            self._log("Servico continuo de afastamentos esta ativo. Pare o servico para executar manualmente.")
+            return
         self._set_status("Status: executando afastamentos...")
         self._ensure_engine_origem()
+        self._ensure_engine_destino()
 
         schema_origem = self._schema_origem()
+        batch_size = self._get_limit()
 
-        repo = RepositorioAfastamentos(self.engine_origem, schema_origem=schema_origem)
-        registros = repo.buscar_dados_afastamentos(limit=self._get_limit())
-        payload = montar_payload_afastamentos(registros)
+        service = AfastamentoSyncService(
+            engine_origem=self.engine_origem,
+            engine_destino=self.engine_destino,
+            database_origem=self._database_origem(),
+            schema_origem=schema_origem,
+            schema_destino=settings.target_schema,
+            tabela_destino=settings.target_afastamento_table,
+            batch_size=batch_size,
+            data_inicio=settings.afastamento_sync_data_inicio,
+        )
+        resultado = service.executar_ciclo()
 
         self._log(f"[Afastamentos] Origem: {self._database_origem()} ({schema_origem})")
-        self._log(f"[Afastamentos] Banco: {len(registros)}")
-        self._log(f"[Afastamentos] Payload: {len(payload)}")
-        self._log(json.dumps(payload[:1], ensure_ascii=False, indent=2, default=str) if payload else "[Afastamentos] Sem payload")
+        self._log(f"[Afastamentos] Destino: {self._database_destino()}.{settings.target_schema}.{settings.target_afastamento_table}")
+        self._log(f"[Afastamentos] Data inicio: {service.data_inicio.isoformat()}")
+        self._log(f"[Afastamentos] Registros origem: {resultado.registros_origem}")
+        self._log(f"[Afastamentos] Payloads validos: {resultado.payloads_validos}")
+        self._log(f"[Afastamentos] Eventos gerados: {resultado.eventos_gerados}")
+        self._log(f"[Afastamentos] Eventos inseridos: {resultado.eventos_inseridos}")
+        self._log(f"[Afastamentos] Cursor reiniciado: {resultado.cursor_reiniciado}")
         self._set_status("Status: afastamentos finalizado")
 
     def _executar_ambos(self):
         self._executar_motoristas()
         self._executar_afastamentos()
+
+    def _motoristas_ativo(self) -> bool:
+        return self.thread_servico_motoristas is not None and self.thread_servico_motoristas.is_alive()
+
+    def _afastamentos_ativo(self) -> bool:
+        return self.thread_servico_afastamentos is not None and self.thread_servico_afastamentos.is_alive()
+
+    def _servicos_ativos(self) -> bool:
+        return self._motoristas_ativo() or self._afastamentos_ativo()
+
+    def _atualizar_status_servicos(self) -> None:
+        m_status = "ON" if self._motoristas_ativo() else "OFF"
+        a_status = "ON" if self._afastamentos_ativo() else "OFF"
+        if self._closing:
+            return
+        try:
+            self.after(0, lambda: self.servicos_status_var.set(f"Servicos: motoristas={m_status} afastamentos={a_status}"))
+        except tk.TclError:
+            pass
+
+    def _iniciar_servicos(self) -> None:
+        self._iniciar_servico_motoristas()
+        self._iniciar_servico_afastamentos()
+
+    def _parar_servicos(self) -> None:
+        self._parar_servico_motoristas()
+        self._parar_servico_afastamentos()
+
+    def _iniciar_servico_motoristas(self) -> None:
+        if self._motoristas_ativo():
+            self._log("Servico de motoristas ja esta em execucao.")
+            return
+
+        self._ensure_engine_origem()
+        self._ensure_engine_destino()
+
+        service = MotoristaSyncService(
+            engine_origem=self.engine_origem,
+            engine_destino=self.engine_destino,
+            database_origem=self._database_origem(),
+            schema_origem=self._schema_origem(),
+            schema_destino=settings.target_schema,
+            tabela_destino=settings.target_motorista_table,
+            batch_size=self._get_limit(),
+        )
+        intervalo = self._get_intervalo_motoristas()
+        stop_event = threading.Event()
+        self.stop_servico_motoristas = stop_event
+
+        def _run():
+            self._log(
+                f"[Servico Motoristas] Iniciado. origem={self._database_origem()} intervalo={intervalo}s lote={self._get_limit()}"
+            )
+            try:
+                service.executar_continuo(
+                    intervalo_segundos=intervalo,
+                    logger=lambda m: self._log(f"[Servico Motoristas] {m}"),
+                    stop_event=stop_event,
+                )
+            except Exception as exc:
+                self._log(f"[Servico Motoristas] ERRO: {exc}")
+            finally:
+                self.thread_servico_motoristas = None
+                self.stop_servico_motoristas = None
+                self._log("[Servico Motoristas] Encerrado.")
+                self._atualizar_status_servicos()
+
+        self.thread_servico_motoristas = threading.Thread(target=_run, daemon=True)
+        self.thread_servico_motoristas.start()
+        self._set_status("Status: servico de motoristas ativo")
+        self._atualizar_status_servicos()
+
+    def _parar_servico_motoristas(self) -> None:
+        if not self._motoristas_ativo():
+            self._log("Servico de motoristas ja esta parado.")
+            self._atualizar_status_servicos()
+            return
+        if self.stop_servico_motoristas is not None:
+            self.stop_servico_motoristas.set()
+        self._set_status("Status: parando servico de motoristas...")
+        self._log("[Servico Motoristas] Sinal de parada enviado.")
+
+    def _iniciar_servico_afastamentos(self) -> None:
+        if self._afastamentos_ativo():
+            self._log("Servico de afastamentos ja esta em execucao.")
+            return
+
+        self._ensure_engine_origem()
+        self._ensure_engine_destino()
+
+        service = AfastamentoSyncService(
+            engine_origem=self.engine_origem,
+            engine_destino=self.engine_destino,
+            database_origem=self._database_origem(),
+            schema_origem=self._schema_origem(),
+            schema_destino=settings.target_schema,
+            tabela_destino=settings.target_afastamento_table,
+            batch_size=self._get_limit(),
+            data_inicio=settings.afastamento_sync_data_inicio,
+        )
+        intervalo = self._get_intervalo_afastamentos()
+        stop_event = threading.Event()
+        self.stop_servico_afastamentos = stop_event
+
+        def _run():
+            self._log(
+                f"[Servico Afastamentos] Iniciado. origem={self._database_origem()} intervalo={intervalo}s lote={self._get_limit()}"
+            )
+            try:
+                service.executar_continuo(
+                    intervalo_segundos=intervalo,
+                    logger=lambda m: self._log(f"[Servico Afastamentos] {m}"),
+                    stop_event=stop_event,
+                )
+            except Exception as exc:
+                self._log(f"[Servico Afastamentos] ERRO: {exc}")
+            finally:
+                self.thread_servico_afastamentos = None
+                self.stop_servico_afastamentos = None
+                self._log("[Servico Afastamentos] Encerrado.")
+                self._atualizar_status_servicos()
+
+        self.thread_servico_afastamentos = threading.Thread(target=_run, daemon=True)
+        self.thread_servico_afastamentos.start()
+        self._set_status("Status: servico de afastamentos ativo")
+        self._atualizar_status_servicos()
+
+    def _parar_servico_afastamentos(self) -> None:
+        if not self._afastamentos_ativo():
+            self._log("Servico de afastamentos ja esta parado.")
+            self._atualizar_status_servicos()
+            return
+        if self.stop_servico_afastamentos is not None:
+            self.stop_servico_afastamentos.set()
+        self._set_status("Status: parando servico de afastamentos...")
+        self._log("[Servico Afastamentos] Sinal de parada enviado.")
+
+    def _nome_win_svc_motoristas(self) -> str:
+        return (self.win_service_motoristas_var.get() or "").strip()
+
+    def _nome_win_svc_afastamentos(self) -> str:
+        return (self.win_service_afastamentos_var.get() or "").strip()
+
+    @staticmethod
+    def _run_cmd(args: list[str]) -> tuple[int, str]:
+        proc = subprocess.run(args, capture_output=True, text=True)
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+        return int(proc.returncode), out
+
+    def _status_windows_service(self, service_name: str) -> tuple[str, str]:
+        nome = (service_name or "").strip()
+        if not nome:
+            return "NOME_VAZIO", ""
+
+        code, output = self._run_cmd(["sc", "query", nome])
+        upper = output.upper()
+
+        if "RUNNING" in upper:
+            return "RUNNING", output
+        if "STOPPED" in upper:
+            return "STOPPED", output
+        if "FAILED 1060" in upper or "DOES NOT EXIST" in upper:
+            return "NAO_INSTALADO", output
+        if code != 0:
+            return "ERRO", output
+        return "DESCONHECIDO", output
+
+    def _aguardar_windows_service(self, service_name: str, esperado: str, timeout_segundos: int = 30) -> bool:
+        limite = time.time() + max(1, timeout_segundos)
+        while time.time() < limite:
+            status, _ = self._status_windows_service(service_name)
+            if status == esperado:
+                return True
+            time.sleep(1)
+        return False
+
+    def _acao_windows_service(self, service_name: str, action: str) -> bool:
+        nome = (service_name or "").strip()
+        if not nome:
+            self._log(f"[WinSvc] Nome de servico vazio para acao {action}.")
+            return False
+        code, output = self._run_cmd(["sc", action, nome])
+        if output:
+            self._log(f"[WinSvc {nome}] {output}")
+        return code == 0
+
+    def _atualizar_status_windows_services(self) -> None:
+        nome_m = self._nome_win_svc_motoristas()
+        nome_a = self._nome_win_svc_afastamentos()
+        status_m, _ = self._status_windows_service(nome_m)
+        status_a, _ = self._status_windows_service(nome_a)
+        texto = f"Windows: motoristas={status_m} afastamentos={status_a}"
+        if not self._closing:
+            try:
+                self.after(0, lambda: self.windows_services_status_var.set(texto))
+            except tk.TclError:
+                pass
+        self._log(f"[WinSvc] Status - M({nome_m})={status_m} | A({nome_a})={status_a}")
+
+    def _iniciar_windows_services(self) -> None:
+        nome_m = self._nome_win_svc_motoristas()
+        nome_a = self._nome_win_svc_afastamentos()
+        self._acao_windows_service(nome_m, "start")
+        self._acao_windows_service(nome_a, "start")
+        time.sleep(1)
+        self._atualizar_status_windows_services()
+
+    def _parar_windows_services(self) -> None:
+        nome_m = self._nome_win_svc_motoristas()
+        nome_a = self._nome_win_svc_afastamentos()
+        self._acao_windows_service(nome_m, "stop")
+        self._acao_windows_service(nome_a, "stop")
+        time.sleep(1)
+        self._atualizar_status_windows_services()
+
+    def _reiniciar_windows_services(self) -> None:
+        nome_m = self._nome_win_svc_motoristas()
+        nome_a = self._nome_win_svc_afastamentos()
+
+        for nome in (nome_m, nome_a):
+            if not nome:
+                continue
+            self._acao_windows_service(nome, "stop")
+            self._aguardar_windows_service(nome, "STOPPED", timeout_segundos=20)
+            self._acao_windows_service(nome, "start")
+
+        time.sleep(1)
+        self._atualizar_status_windows_services()
+
+    def _ao_fechar(self) -> None:
+        self._closing = True
+        self._parar_servicos()
+        self.after(150, self.destroy)
 
 
 def iniciar_interface() -> None:
