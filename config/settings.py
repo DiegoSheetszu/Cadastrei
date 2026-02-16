@@ -91,6 +91,22 @@ class Settings(BaseModel):
     win_service_motoristas_prod: str = Field(default="CadastreiMotoristasProd", alias="WIN_SERVICE_MOTORISTAS_PROD")
     win_service_afastamentos_dev: str = Field(default="CadastreiAfastamentosHom", alias="WIN_SERVICE_AFASTAMENTOS_DEV")
     win_service_afastamentos_prod: str = Field(default="CadastreiAfastamentosProd", alias="WIN_SERVICE_AFASTAMENTOS_PROD")
+    win_service_api_motoristas_dev: str = Field(
+        default="CadastreiApiMotoristasHom",
+        alias="WIN_SERVICE_API_MOTORISTAS_DEV",
+    )
+    win_service_api_motoristas_prod: str = Field(
+        default="CadastreiApiMotoristasProd",
+        alias="WIN_SERVICE_API_MOTORISTAS_PROD",
+    )
+    win_service_api_afastamentos_dev: str = Field(
+        default="CadastreiApiAfastamentosHom",
+        alias="WIN_SERVICE_API_AFASTAMENTOS_DEV",
+    )
+    win_service_api_afastamentos_prod: str = Field(
+        default="CadastreiApiAfastamentosProd",
+        alias="WIN_SERVICE_API_AFASTAMENTOS_PROD",
+    )
 
     def databases(self) -> list[str]:
         return [x.strip() for x in self.db_databases.split(",") if x.strip()]
