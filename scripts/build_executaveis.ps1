@@ -57,9 +57,7 @@ Ensure-PythonModule -ModuleName "sqlalchemy"
 Ensure-PythonModule -ModuleName "pyodbc"
 Ensure-PythonModule -ModuleName "pydantic"
 Ensure-PythonModule -ModuleName "python-dotenv"
-if ($IncluirInterface) {
-    Ensure-PythonModule -ModuleName "httpx"
-}
+Ensure-PythonModule -ModuleName "httpx"
 
 function Stop-TargetProcessIfRunning {
     param(
@@ -130,23 +128,17 @@ function Invoke-BuildTarget {
         "--paths", $repo,
         "--hidden-import", "pyodbc",
         "--hidden-import", "sqlalchemy.dialects.mssql.pyodbc",
+        "--hidden-import", "httpx",
+        "--hidden-import", "httpcore",
+        "--hidden-import", "anyio",
+        "--hidden-import", "sniffio",
+        "--hidden-import", "certifi",
+        "--hidden-import", "idna",
         "--collect-binaries", "pyodbc"
     )
 
     if ($Windowed) {
         $cmd += "--windowed"
-        $cmd += "--hidden-import"
-        $cmd += "httpx"
-        $cmd += "--hidden-import"
-        $cmd += "httpcore"
-        $cmd += "--hidden-import"
-        $cmd += "anyio"
-        $cmd += "--hidden-import"
-        $cmd += "sniffio"
-        $cmd += "--hidden-import"
-        $cmd += "certifi"
-        $cmd += "--hidden-import"
-        $cmd += "idna"
     }
     $cmd += $scriptPath
 
@@ -163,11 +155,13 @@ $buildHom = $Ambiente -in @("Todos", "Homologacao")
 if ($buildProd) {
     Invoke-BuildTarget -Name "CadastreiMotoristasProd" -ScriptRelativePath "scripts\servico_motoristas_prod.py" -DistPath $appsProdPath
     Invoke-BuildTarget -Name "CadastreiAfastamentosProd" -ScriptRelativePath "scripts\servico_afastamentos_prod.py" -DistPath $appsProdPath
+    Invoke-BuildTarget -Name "CadastreiApiDispatchProd" -ScriptRelativePath "scripts\servico_api_dispatch.py" -DistPath $appsProdPath
 }
 
 if ($buildHom) {
     Invoke-BuildTarget -Name "CadastreiMotoristasHom" -ScriptRelativePath "scripts\servico_motoristas_hom.py" -DistPath $appsHomPath
     Invoke-BuildTarget -Name "CadastreiAfastamentosHom" -ScriptRelativePath "scripts\servico_afastamentos_hom.py" -DistPath $appsHomPath
+    Invoke-BuildTarget -Name "CadastreiApiDispatchHom" -ScriptRelativePath "scripts\servico_api_dispatch.py" -DistPath $appsHomPath
 }
 
 if ($IncluirInterface) {
@@ -184,10 +178,12 @@ if (Test-Path $envOrigem) {
     if ($buildProd) {
         $targetsEnv += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env")
         $targetsEnv += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env")
+        $targetsEnv += (Join-Path $appsProdPath "CadastreiApiDispatchProd\.env")
     }
     if ($buildHom) {
         $targetsEnv += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env")
         $targetsEnv += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env")
+        $targetsEnv += (Join-Path $appsHomPath "CadastreiApiDispatchHom\.env")
     }
     if ($IncluirInterface) {
         $targetsEnv += (Join-Path $appsUiPath "CadastreiInterface\.env")
@@ -212,10 +208,12 @@ if (Test-Path $envExampleOrigem) {
     if ($buildProd) {
         $targetsEnvExample += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env.example")
         $targetsEnvExample += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env.example")
+        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiDispatchProd\.env.example")
     }
     if ($buildHom) {
         $targetsEnvExample += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env.example")
         $targetsEnvExample += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env.example")
+        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiDispatchHom\.env.example")
     }
     if ($IncluirInterface) {
         $targetsEnvExample += (Join-Path $appsUiPath "CadastreiInterface\.env.example")

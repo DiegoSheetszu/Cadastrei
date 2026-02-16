@@ -5,9 +5,15 @@ param(
     [string]$Ambiente = "Producao",
     [string]$ServicoMotoristas = "",
     [string]$ServicoAfastamentos = "",
+    [string]$ServicoApi = "",
     [int]$IntervaloSegundos = 30,
     [int]$BatchSize = 100,
     [string]$DataInicioAfastamentos = "",
+    [switch]$InstalarApi,
+    [int]$ApiMaxTentativas = 10,
+    [int]$ApiLockTimeoutMin = 15,
+    [int]$ApiRetryBaseSec = 60,
+    [int]$ApiRetryMaxSec = 3600,
     [switch]$Reinstalar
 )
 
@@ -23,9 +29,11 @@ New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
 if ($Ambiente -eq "Producao") {
     $exeMotoristas = Join-Path $BaseDir "apps\prod\CadastreiMotoristasProd\CadastreiMotoristasProd.exe"
     $exeAfastamentos = Join-Path $BaseDir "apps\prod\CadastreiAfastamentosProd\CadastreiAfastamentosProd.exe"
+    $exeApi = Join-Path $BaseDir "apps\prod\CadastreiApiDispatchProd\CadastreiApiDispatchProd.exe"
 } else {
     $exeMotoristas = Join-Path $BaseDir "apps\hom\CadastreiMotoristasHom\CadastreiMotoristasHom.exe"
     $exeAfastamentos = Join-Path $BaseDir "apps\hom\CadastreiAfastamentosHom\CadastreiAfastamentosHom.exe"
+    $exeApi = Join-Path $BaseDir "apps\hom\CadastreiApiDispatchHom\CadastreiApiDispatchHom.exe"
 }
 
 if (-not (Test-Path $exeMotoristas)) {
@@ -33,6 +41,9 @@ if (-not (Test-Path $exeMotoristas)) {
 }
 if (-not (Test-Path $exeAfastamentos)) {
     throw "Executavel de afastamentos nao encontrado: $exeAfastamentos"
+}
+if ($InstalarApi -and -not (Test-Path $exeApi)) {
+    throw "Executavel do despachante API nao encontrado: $exeApi"
 }
 
 if ([string]::IsNullOrWhiteSpace($ServicoMotoristas)) {
@@ -43,15 +54,21 @@ if ([string]::IsNullOrWhiteSpace($ServicoAfastamentos)) {
     if ($Ambiente -eq "Producao") { $ServicoAfastamentos = "CadastreiAfastamentosProd" }
     else { $ServicoAfastamentos = "CadastreiAfastamentosHom" }
 }
+if ($InstalarApi -and [string]::IsNullOrWhiteSpace($ServicoApi)) {
+    if ($Ambiente -eq "Producao") { $ServicoApi = "CadastreiApiDispatchProd" }
+    else { $ServicoApi = "CadastreiApiDispatchHom" }
+}
 
 if ($Ambiente -eq "Producao") { $origemDb = "Vetorh_Prod" } else { $origemDb = "Vetorh_Hom" }
 
 if ($Ambiente -eq "Producao") {
     $logMotoristas = "logs\motoristas_prod.log"
     $logAfastamentos = "logs\afastamentos_prod.log"
+    $logApi = "logs\api_dispatch_prod.log"
 } else {
     $logMotoristas = "logs\motoristas_hom.log"
     $logAfastamentos = "logs\afastamentos_hom.log"
+    $logApi = "logs\api_dispatch_hom.log"
 }
 
 $argsMotoristas = "--origem-db $origemDb --destino-db Cadastrei --intervalo $IntervaloSegundos --batch-size $BatchSize --log-file $logMotoristas"
@@ -59,6 +76,7 @@ $argsAfastamentos = "--origem-db $origemDb --destino-db Cadastrei --intervalo $I
 if (-not [string]::IsNullOrWhiteSpace($DataInicioAfastamentos)) {
     $argsAfastamentos = "$argsAfastamentos --data-inicio $DataInicioAfastamentos"
 }
+$argsApi = "--destino-db Cadastrei --schema-destino dbo --intervalo $IntervaloSegundos --batch-motoristas $BatchSize --batch-afastamentos $BatchSize --max-tentativas $ApiMaxTentativas --lock-timeout-min $ApiLockTimeoutMin --retry-base-sec $ApiRetryBaseSec --retry-max-sec $ApiRetryMaxSec --log-file $logApi"
 
 function Test-ServiceExists([string]$Name) {
     sc.exe query $Name | Out-Null
@@ -142,6 +160,8 @@ $stdoutMotoristas = Join-Path $logsDir "motoristas_nssm.out.log"
 $stderrMotoristas = Join-Path $logsDir "motoristas_nssm.err.log"
 $stdoutAfastamentos = Join-Path $logsDir "afastamentos_nssm.out.log"
 $stderrAfastamentos = Join-Path $logsDir "afastamentos_nssm.err.log"
+$stdoutApi = Join-Path $logsDir "api_dispatch_nssm.out.log"
+$stderrApi = Join-Path $logsDir "api_dispatch_nssm.err.log"
 
 Configure-Service `
     -Name $ServicoMotoristas `
@@ -157,11 +177,26 @@ Configure-Service `
     -StdoutLog $stdoutAfastamentos `
     -StderrLog $stderrAfastamentos
 
+if ($InstalarApi) {
+    Configure-Service `
+        -Name $ServicoApi `
+        -Exe $exeApi `
+        -Args $argsApi `
+        -StdoutLog $stdoutApi `
+        -StderrLog $stderrApi
+}
+
 Start-ServiceChecked -Name $ServicoMotoristas -StdoutLog $stdoutMotoristas -StderrLog $stderrMotoristas
 Start-ServiceChecked -Name $ServicoAfastamentos -StdoutLog $stdoutAfastamentos -StderrLog $stderrAfastamentos
+if ($InstalarApi) {
+    Start-ServiceChecked -Name $ServicoApi -StdoutLog $stdoutApi -StderrLog $stderrApi
+}
 
 Write-Host "Servicos configurados e iniciados com sucesso."
 Write-Host "Motoristas:   $ServicoMotoristas"
 Write-Host "Afastamentos: $ServicoAfastamentos"
+if ($InstalarApi) {
+    Write-Host "Despachante API: $ServicoApi"
+}
 Write-Host "Ambiente:     $Ambiente (origem=$origemDb)"
 Write-Host "Base:         $BaseDir"
