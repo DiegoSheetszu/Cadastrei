@@ -155,13 +155,15 @@ $buildHom = $Ambiente -in @("Todos", "Homologacao")
 if ($buildProd) {
     Invoke-BuildTarget -Name "CadastreiMotoristasProd" -ScriptRelativePath "scripts\servico_motoristas_prod.py" -DistPath $appsProdPath
     Invoke-BuildTarget -Name "CadastreiAfastamentosProd" -ScriptRelativePath "scripts\servico_afastamentos_prod.py" -DistPath $appsProdPath
-    Invoke-BuildTarget -Name "CadastreiApiDispatchProd" -ScriptRelativePath "scripts\servico_api_dispatch.py" -DistPath $appsProdPath
+    Invoke-BuildTarget -Name "CadastreiApiMotoristasProd" -ScriptRelativePath "scripts\servico_api_motoristas.py" -DistPath $appsProdPath
+    Invoke-BuildTarget -Name "CadastreiApiAfastamentosProd" -ScriptRelativePath "scripts\servico_api_afastamentos.py" -DistPath $appsProdPath
 }
 
 if ($buildHom) {
     Invoke-BuildTarget -Name "CadastreiMotoristasHom" -ScriptRelativePath "scripts\servico_motoristas_hom.py" -DistPath $appsHomPath
     Invoke-BuildTarget -Name "CadastreiAfastamentosHom" -ScriptRelativePath "scripts\servico_afastamentos_hom.py" -DistPath $appsHomPath
-    Invoke-BuildTarget -Name "CadastreiApiDispatchHom" -ScriptRelativePath "scripts\servico_api_dispatch.py" -DistPath $appsHomPath
+    Invoke-BuildTarget -Name "CadastreiApiMotoristasHom" -ScriptRelativePath "scripts\servico_api_motoristas.py" -DistPath $appsHomPath
+    Invoke-BuildTarget -Name "CadastreiApiAfastamentosHom" -ScriptRelativePath "scripts\servico_api_afastamentos.py" -DistPath $appsHomPath
 }
 
 if ($IncluirInterface) {
@@ -178,12 +180,14 @@ if (Test-Path $envOrigem) {
     if ($buildProd) {
         $targetsEnv += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env")
         $targetsEnv += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env")
-        $targetsEnv += (Join-Path $appsProdPath "CadastreiApiDispatchProd\.env")
+        $targetsEnv += (Join-Path $appsProdPath "CadastreiApiMotoristasProd\.env")
+        $targetsEnv += (Join-Path $appsProdPath "CadastreiApiAfastamentosProd\.env")
     }
     if ($buildHom) {
         $targetsEnv += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env")
         $targetsEnv += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env")
-        $targetsEnv += (Join-Path $appsHomPath "CadastreiApiDispatchHom\.env")
+        $targetsEnv += (Join-Path $appsHomPath "CadastreiApiMotoristasHom\.env")
+        $targetsEnv += (Join-Path $appsHomPath "CadastreiApiAfastamentosHom\.env")
     }
     if ($IncluirInterface) {
         $targetsEnv += (Join-Path $appsUiPath "CadastreiInterface\.env")
@@ -208,12 +212,14 @@ if (Test-Path $envExampleOrigem) {
     if ($buildProd) {
         $targetsEnvExample += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env.example")
         $targetsEnvExample += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env.example")
-        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiDispatchProd\.env.example")
+        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiMotoristasProd\.env.example")
+        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiAfastamentosProd\.env.example")
     }
     if ($buildHom) {
         $targetsEnvExample += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env.example")
         $targetsEnvExample += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env.example")
-        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiDispatchHom\.env.example")
+        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiMotoristasHom\.env.example")
+        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiAfastamentosHom\.env.example")
     }
     if ($IncluirInterface) {
         $targetsEnvExample += (Join-Path $appsUiPath "CadastreiInterface\.env.example")

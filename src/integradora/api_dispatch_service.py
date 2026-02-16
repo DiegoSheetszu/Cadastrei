@@ -43,7 +43,14 @@ class ApiDispatchService:
         retry_base_seconds: int = 60,
         retry_max_seconds: int = 3600,
         api_timeout_seconds: float = 30.0,
+        processar_motoristas: bool = True,
+        processar_afastamentos: bool = True,
     ) -> None:
+        self.processar_motoristas = bool(processar_motoristas)
+        self.processar_afastamentos = bool(processar_afastamentos)
+        if not self.processar_motoristas and not self.processar_afastamentos:
+            raise ValueError("ApiDispatchService precisa processar pelo menos um tipo de fila.")
+
         self.batch_size_motoristas = max(1, int(batch_size_motoristas))
         self.batch_size_afastamentos = max(1, int(batch_size_afastamentos))
         self.max_tentativas = max(1, int(max_tentativas))
@@ -67,39 +74,41 @@ class ApiDispatchService:
     def executar_ciclo(self) -> ResultadoCicloApi:
         resultado = ResultadoCicloApi()
 
-        locks = self.repo.liberar_locks_expirados(
-            lock_timeout_minutes=self.lock_timeout_minutes
-        )
-        resultado.locks_liberados_motoristas = int(locks.get("motoristas") or 0)
-        resultado.locks_liberados_afastamentos = int(locks.get("afastamentos") or 0)
+        if self.processar_motoristas:
+            resultado.locks_liberados_motoristas = self.repo.liberar_locks_expirados_motoristas(
+                lock_timeout_minutes=self.lock_timeout_minutes
+            )
+            lock_id_motoristas = str(uuid.uuid4())
+            eventos_motoristas = self.repo.capturar_motoristas_pendentes(
+                lock_id=lock_id_motoristas,
+                batch_size=self.batch_size_motoristas,
+                max_tentativas=self.max_tentativas,
+                lock_timeout_minutes=self.lock_timeout_minutes,
+            )
+            resultado.motoristas_capturados = len(eventos_motoristas)
+            for evento in eventos_motoristas:
+                if self._processar_motorista(evento, lock_id_motoristas):
+                    resultado.motoristas_sucesso += 1
+                else:
+                    resultado.motoristas_erro += 1
 
-        lock_id_motoristas = f"M-{uuid.uuid4().hex}"
-        eventos_motoristas = self.repo.capturar_motoristas_pendentes(
-            lock_id=lock_id_motoristas,
-            batch_size=self.batch_size_motoristas,
-            max_tentativas=self.max_tentativas,
-            lock_timeout_minutes=self.lock_timeout_minutes,
-        )
-        resultado.motoristas_capturados = len(eventos_motoristas)
-        for evento in eventos_motoristas:
-            if self._processar_motorista(evento, lock_id_motoristas):
-                resultado.motoristas_sucesso += 1
-            else:
-                resultado.motoristas_erro += 1
-
-        lock_id_afastamentos = f"A-{uuid.uuid4().hex}"
-        eventos_afastamentos = self.repo.capturar_afastamentos_pendentes(
-            lock_id=lock_id_afastamentos,
-            batch_size=self.batch_size_afastamentos,
-            max_tentativas=self.max_tentativas,
-            lock_timeout_minutes=self.lock_timeout_minutes,
-        )
-        resultado.afastamentos_capturados = len(eventos_afastamentos)
-        for evento in eventos_afastamentos:
-            if self._processar_afastamento(evento, lock_id_afastamentos):
-                resultado.afastamentos_sucesso += 1
-            else:
-                resultado.afastamentos_erro += 1
+        if self.processar_afastamentos:
+            resultado.locks_liberados_afastamentos = self.repo.liberar_locks_expirados_afastamentos(
+                lock_timeout_minutes=self.lock_timeout_minutes
+            )
+            lock_id_afastamentos = str(uuid.uuid4())
+            eventos_afastamentos = self.repo.capturar_afastamentos_pendentes(
+                lock_id=lock_id_afastamentos,
+                batch_size=self.batch_size_afastamentos,
+                max_tentativas=self.max_tentativas,
+                lock_timeout_minutes=self.lock_timeout_minutes,
+            )
+            resultado.afastamentos_capturados = len(eventos_afastamentos)
+            for evento in eventos_afastamentos:
+                if self._processar_afastamento(evento, lock_id_afastamentos):
+                    resultado.afastamentos_sucesso += 1
+                else:
+                    resultado.afastamentos_erro += 1
 
         return resultado
 

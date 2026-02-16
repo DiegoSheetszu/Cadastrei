@@ -48,6 +48,18 @@ class RepositorioFilaIntegracaoApi:
             ),
         }
 
+    def liberar_locks_expirados_motoristas(self, lock_timeout_minutes: int = 15) -> int:
+        return self._liberar_locks_expirados_tabela(
+            self.tabela_motorista,
+            lock_timeout_minutes=lock_timeout_minutes,
+        )
+
+    def liberar_locks_expirados_afastamentos(self, lock_timeout_minutes: int = 15) -> int:
+        return self._liberar_locks_expirados_tabela(
+            self.tabela_afastamento,
+            lock_timeout_minutes=lock_timeout_minutes,
+        )
+
     def capturar_motoristas_pendentes(
         self,
         *,
@@ -264,8 +276,10 @@ class RepositorioFilaIntegracaoApi:
             selected_aliases.add(actual_name)
 
         select_cols = ",\n                        ".join(select_parts)
+        # Em UPDATE sobre CTE, a pseudo-tabela INSERTED expõe os nomes do CTE
+        # (aliases selecionados), não necessariamente os nomes físicos da tabela.
         output_cols = ",\n                    ".join(
-            f"INSERTED.[{resolved[alias]}] AS [{alias}]"
+            f"INSERTED.[{alias}] AS [{alias}]"
             for alias in output_aliases
         )
 
