@@ -31,12 +31,27 @@ class IntegracaoApp(tk.Tk):
         self.stop_servico_afastamentos: threading.Event | None = None
         self._closing = False
 
-        self.database_var = tk.StringVar(value=settings.source_database_dev)
-        self.database_destino_var = tk.StringVar(value=settings.target_database)
-        self.limit_var = tk.StringVar(value="1")
+        self.origens_opcoes = self._unique([settings.source_database_dev, settings.source_database_prod])
+        self.destinos_opcoes = self._unique([settings.target_database])
+        self.lote_opcoes = ["1", "5", "10", "20", "50", "100", "200", "500", "1000"]
+        self.intervalo_opcoes = ["5", "10", "15", "30", "60", "120", "300"]
+        self.win_service_motoristas_opcoes = self._unique(
+            [settings.win_service_motoristas_dev, settings.win_service_motoristas_prod]
+        )
+        self.win_service_afastamentos_opcoes = self._unique(
+            [settings.win_service_afastamentos_dev, settings.win_service_afastamentos_prod]
+        )
+
+        self.database_var = tk.StringVar(value=self.origens_opcoes[0])
+        self.database_destino_var = tk.StringVar(value=self.destinos_opcoes[0])
+        self.limit_var = tk.StringVar(value=self.lote_opcoes[0])
         self.ambiente_var = tk.StringVar(value=self._ambiente_por_database(self.database_var.get()))
-        self.intervalo_motoristas_var = tk.StringVar(value=str(settings.motorista_sync_interval_seconds))
-        self.intervalo_afastamentos_var = tk.StringVar(value=str(settings.afastamento_sync_interval_seconds))
+        self.intervalo_motoristas_var = tk.StringVar(
+            value=self._closest_option(str(settings.motorista_sync_interval_seconds), self.intervalo_opcoes)
+        )
+        self.intervalo_afastamentos_var = tk.StringVar(
+            value=self._closest_option(str(settings.afastamento_sync_interval_seconds), self.intervalo_opcoes)
+        )
         win_m, win_a = self._nomes_servicos_windows_por_ambiente(self.ambiente_var.get())
         self.win_service_motoristas_var = tk.StringVar(value=win_m)
         self.win_service_afastamentos_var = tk.StringVar(value=win_a)
@@ -69,13 +84,31 @@ class IntegracaoApp(tk.Tk):
         )
 
         ttk.Label(top, text="Origem:").grid(row=0, column=3, sticky="w")
-        ttk.Entry(top, textvariable=self.database_var, width=16).grid(row=0, column=4, padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.database_var,
+            values=self.origens_opcoes,
+            state="readonly",
+            width=16,
+        ).grid(row=0, column=4, padx=(6, 14), sticky="w")
 
         ttk.Label(top, text="Destino:").grid(row=0, column=5, sticky="w")
-        ttk.Entry(top, textvariable=self.database_destino_var, width=14).grid(row=0, column=6, padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.database_destino_var,
+            values=self.destinos_opcoes,
+            state="readonly",
+            width=14,
+        ).grid(row=0, column=6, padx=(6, 14), sticky="w")
 
         ttk.Label(top, text="Lote:").grid(row=0, column=7, sticky="w")
-        ttk.Entry(top, textvariable=self.limit_var, width=6).grid(row=0, column=8, padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.limit_var,
+            values=self.lote_opcoes,
+            state="readonly",
+            width=6,
+        ).grid(row=0, column=8, padx=(6, 14), sticky="w")
 
         ttk.Button(top, text="Login", command=lambda: self._run_async(self._login)).grid(row=0, column=9, padx=(0, 8))
         ttk.Button(top, text="Motoristas", command=lambda: self._run_async(self._executar_motoristas)).grid(row=0, column=10, padx=(0, 8))
@@ -83,9 +116,21 @@ class IntegracaoApp(tk.Tk):
         ttk.Button(top, text="Executar ambos", command=lambda: self._run_async(self._executar_ambos)).grid(row=0, column=12, sticky="w")
 
         ttk.Label(top, text="Int. M(s):").grid(row=1, column=0, pady=(10, 0), sticky="w")
-        ttk.Entry(top, textvariable=self.intervalo_motoristas_var, width=6).grid(row=1, column=1, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.intervalo_motoristas_var,
+            values=self.intervalo_opcoes,
+            state="readonly",
+            width=6,
+        ).grid(row=1, column=1, pady=(10, 0), padx=(6, 14), sticky="w")
         ttk.Label(top, text="Int. A(s):").grid(row=1, column=2, pady=(10, 0), sticky="w")
-        ttk.Entry(top, textvariable=self.intervalo_afastamentos_var, width=6).grid(row=1, column=3, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.intervalo_afastamentos_var,
+            values=self.intervalo_opcoes,
+            state="readonly",
+            width=6,
+        ).grid(row=1, column=3, pady=(10, 0), padx=(6, 14), sticky="w")
 
         ttk.Button(top, text="Iniciar M", command=lambda: self._run_async(self._iniciar_servico_motoristas)).grid(row=1, column=4, pady=(10, 0), padx=(0, 8))
         ttk.Button(top, text="Parar M", command=self._parar_servico_motoristas).grid(row=1, column=5, pady=(10, 0), padx=(0, 8))
@@ -96,9 +141,21 @@ class IntegracaoApp(tk.Tk):
         ttk.Label(top, textvariable=self.servicos_status_var).grid(row=1, column=10, columnspan=4, pady=(10, 0), sticky="w")
 
         ttk.Label(top, text="WinSvc M:").grid(row=2, column=0, pady=(10, 0), sticky="w")
-        ttk.Entry(top, textvariable=self.win_service_motoristas_var, width=26).grid(row=2, column=1, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.win_service_motoristas_var,
+            values=self.win_service_motoristas_opcoes,
+            state="readonly",
+            width=26,
+        ).grid(row=2, column=1, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
         ttk.Label(top, text="WinSvc A:").grid(row=2, column=4, pady=(10, 0), sticky="w")
-        ttk.Entry(top, textvariable=self.win_service_afastamentos_var, width=26).grid(row=2, column=5, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
+        ttk.Combobox(
+            top,
+            textvariable=self.win_service_afastamentos_var,
+            values=self.win_service_afastamentos_opcoes,
+            state="readonly",
+            width=26,
+        ).grid(row=2, column=5, columnspan=3, pady=(10, 0), padx=(6, 14), sticky="w")
         ttk.Button(top, text="Status WinSvc", command=lambda: self._run_async(self._atualizar_status_windows_services)).grid(row=2, column=8, pady=(10, 0), padx=(0, 8))
         ttk.Button(top, text="Iniciar WinSvc", command=lambda: self._run_async(self._iniciar_windows_services)).grid(row=2, column=9, pady=(10, 0), padx=(0, 8))
         ttk.Button(top, text="Parar WinSvc", command=lambda: self._run_async(self._parar_windows_services)).grid(row=2, column=10, pady=(10, 0), padx=(0, 8))
@@ -182,6 +239,26 @@ class IntegracaoApp(tk.Tk):
     def _schema_origem(self) -> str:
         return settings.source_schema_for_database(self._database_origem())
 
+    @staticmethod
+    def _unique(values: list[str]) -> list[str]:
+        items: list[str] = []
+        seen: set[str] = set()
+        for value in values:
+            text = str(value or "").strip()
+            if not text:
+                continue
+            if text not in seen:
+                seen.add(text)
+                items.append(text)
+        return items or [""]
+
+    @staticmethod
+    def _closest_option(value: str, options: list[str]) -> str:
+        text = str(value or "").strip()
+        if text in options:
+            return text
+        return options[0] if options else text
+
     def _ambiente_por_database(self, database: str) -> str:
         db = (database or "").strip().lower()
         if db == settings.source_database_prod.lower():
@@ -212,8 +289,10 @@ class IntegracaoApp(tk.Tk):
         db_origem = self._database_por_ambiente(self.ambiente_var.get())
         svc_m, svc_a = self._nomes_servicos_windows_por_ambiente(ambiente)
         self.database_var.set(db_origem)
-        self.win_service_motoristas_var.set(svc_m)
-        self.win_service_afastamentos_var.set(svc_a)
+        if svc_m in self.win_service_motoristas_opcoes:
+            self.win_service_motoristas_var.set(svc_m)
+        if svc_a in self.win_service_afastamentos_opcoes:
+            self.win_service_afastamentos_var.set(svc_a)
         if self.engine_origem is not None:
             try:
                 self.engine_origem.dispose()
@@ -346,6 +425,10 @@ class IntegracaoApp(tk.Tk):
         if self._motoristas_ativo():
             self._log("Servico de motoristas ja esta em execucao.")
             return
+        status_win, _ = self._status_windows_service(self._nome_win_svc_motoristas())
+        if status_win == "RUNNING":
+            self._log("WinSvc de motoristas esta RUNNING. Nao iniciarei servico local em paralelo.")
+            return
 
         self._ensure_engine_origem()
         self._ensure_engine_destino()
@@ -399,6 +482,10 @@ class IntegracaoApp(tk.Tk):
     def _iniciar_servico_afastamentos(self) -> None:
         if self._afastamentos_ativo():
             self._log("Servico de afastamentos ja esta em execucao.")
+            return
+        status_win, _ = self._status_windows_service(self._nome_win_svc_afastamentos())
+        if status_win == "RUNNING":
+            self._log("WinSvc de afastamentos esta RUNNING. Nao iniciarei servico local em paralelo.")
             return
 
         self._ensure_engine_origem()
@@ -498,6 +585,9 @@ class IntegracaoApp(tk.Tk):
         code, output = self._run_cmd(["sc", action, nome])
         if output:
             self._log(f"[WinSvc {nome}] {output}")
+            upper = output.upper()
+            if "FAILED 5" in upper or "ACCESS IS DENIED" in upper:
+                self._log("[WinSvc] Permissao negada. Execute a interface como Administrador para controlar servicos Windows.")
         return code == 0
 
     def _atualizar_status_windows_services(self) -> None:
