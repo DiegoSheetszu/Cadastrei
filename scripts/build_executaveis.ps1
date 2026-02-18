@@ -203,6 +203,37 @@ if (Test-Path $envOrigem) {
     Write-Host "Arquivo .env nao encontrado no repositorio. Copie manualmente para $envDestino"
 }
 
+$clientesApiOrigem = Join-Path $repo "clientes_api.json"
+$clientesApiDestino = Join-Path $DestinoRaiz "clientes_api.json"
+if (Test-Path $clientesApiOrigem) {
+    Copy-Item $clientesApiOrigem $clientesApiDestino -Force
+    Write-Host "Arquivo clientes_api.json copiado para $clientesApiDestino"
+
+    $targetsClientesApi = @()
+    if ($buildProd) {
+        $targetsClientesApi += (Join-Path $appsProdPath "CadastreiMotoristasProd\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsProdPath "CadastreiAfastamentosProd\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsProdPath "CadastreiApiMotoristasProd\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsProdPath "CadastreiApiAfastamentosProd\clientes_api.json")
+    }
+    if ($buildHom) {
+        $targetsClientesApi += (Join-Path $appsHomPath "CadastreiMotoristasHom\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsHomPath "CadastreiAfastamentosHom\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsHomPath "CadastreiApiMotoristasHom\clientes_api.json")
+        $targetsClientesApi += (Join-Path $appsHomPath "CadastreiApiAfastamentosHom\clientes_api.json")
+    }
+    if ($IncluirInterface) {
+        $targetsClientesApi += (Join-Path $appsUiPath "CadastreiInterface\clientes_api.json")
+    }
+
+    foreach ($target in $targetsClientesApi) {
+        $targetDir = Split-Path -Parent $target
+        if (Test-Path $targetDir) {
+            Copy-Item $clientesApiOrigem $target -Force
+        }
+    }
+}
+
 $envExampleOrigem = Join-Path $repo ".env.example"
 $envExampleDestino = Join-Path $DestinoRaiz ".env.example"
 if (Test-Path $envExampleOrigem) {

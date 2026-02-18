@@ -17,6 +17,11 @@ param(
     [int]$ApiLockTimeoutMin = 15,
     [int]$ApiRetryBaseSec = 60,
     [int]$ApiRetryMaxSec = 3600,
+    [string]$ClienteApiId = "",
+    [string]$ApiEndpointIdMotoristas = "",
+    [string]$ApiEndpointIdAfastamentos = "",
+    [string]$ApiRegistryFile = "",
+    [switch]$SemRegistryApi,
     [switch]$Reinstalar
 )
 
@@ -95,6 +100,25 @@ if (-not [string]::IsNullOrWhiteSpace($DataInicioAfastamentos)) {
 }
 $argsApiMotoristas = "--destino-db Cadastrei --schema-destino dbo --intervalo $IntervaloSegundos --batch-motoristas $BatchSize --max-tentativas $ApiMaxTentativas --lock-timeout-min $ApiLockTimeoutMin --retry-base-sec $ApiRetryBaseSec --retry-max-sec $ApiRetryMaxSec --log-file $logApiMotoristas"
 $argsApiAfastamentos = "--destino-db Cadastrei --schema-destino dbo --intervalo $IntervaloSegundos --batch-afastamentos $BatchSize --max-tentativas $ApiMaxTentativas --lock-timeout-min $ApiLockTimeoutMin --retry-base-sec $ApiRetryBaseSec --retry-max-sec $ApiRetryMaxSec --log-file $logApiAfastamentos"
+
+if (-not [string]::IsNullOrWhiteSpace($ClienteApiId)) {
+    $argsApiMotoristas = "$argsApiMotoristas --cliente-id $ClienteApiId"
+    $argsApiAfastamentos = "$argsApiAfastamentos --cliente-id $ClienteApiId"
+}
+if (-not [string]::IsNullOrWhiteSpace($ApiEndpointIdMotoristas)) {
+    $argsApiMotoristas = "$argsApiMotoristas --endpoint-id $ApiEndpointIdMotoristas"
+}
+if (-not [string]::IsNullOrWhiteSpace($ApiEndpointIdAfastamentos)) {
+    $argsApiAfastamentos = "$argsApiAfastamentos --endpoint-id $ApiEndpointIdAfastamentos"
+}
+if (-not [string]::IsNullOrWhiteSpace($ApiRegistryFile)) {
+    $argsApiMotoristas = "$argsApiMotoristas --registry-file `"$ApiRegistryFile`""
+    $argsApiAfastamentos = "$argsApiAfastamentos --registry-file `"$ApiRegistryFile`""
+}
+if ($SemRegistryApi) {
+    $argsApiMotoristas = "$argsApiMotoristas --sem-registry"
+    $argsApiAfastamentos = "$argsApiAfastamentos --sem-registry"
+}
 
 function Test-ServiceExists([string]$Name) {
     sc.exe query $Name | Out-Null

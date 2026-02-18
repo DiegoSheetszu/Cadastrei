@@ -1,5 +1,5 @@
 {
-  "active_id": "9cb0e976-2ce4-441e-bbc0-5eb41140cfec",
+  "active_id": "05814246-7d11-42aa-acda-220bf1453258",
   "items": [
     {
       "id": "9cb0e976-2ce4-441e-bbc0-5eb41140cfec",
@@ -12,6 +12,214 @@
       "endpoint_motorista": "/v1/motorista",
       "endpoint_afastamento": "/v1/afastamento",
       "timeout_seconds": 30.0
+    },
+    {
+      "id": "05814246-7d11-42aa-acda-220bf1453258",
+      "nome": "ATS (Padrao .env)",
+      "fornecedor": "ATS_Log",
+      "base_url": "https://servicedesk.atslog.com.br:8087",
+      "login_url": "https://servicedesk.atslog.com.br:8087/login",
+      "usuario": "atslog.teste",
+      "senha": "teste@123",
+      "timeout_seconds": 30.0,
+      "endpoints": [
+        {
+          "id": "6085378b-3944-4c1d-984b-75225316bf4c",
+          "tipo": "motoristas",
+          "endpoint": "/v1/motorista",
+          "tabela_destino": "MotoristaCadastro",
+          "ativo": true,
+          "de_para": [
+            {
+              "origem": "payload.nome",
+              "destino": "nome",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.cpf",
+              "destino": "cpf",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.datanascimento",
+              "destino": "datanascimento",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.genero",
+              "destino": "genero",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.endereco.rua",
+              "destino": "endereco.rua",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": "NAO INFORMADO"
+            },
+            {
+              "origem": "payload.endereco.numero",
+              "destino": "endereco.numero",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": "SN"
+            },
+            {
+              "origem": "payload.endereco.complemento",
+              "destino": "endereco.complemento",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.endereco.bairro",
+              "destino": "endereco.bairro",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": "NAO INFORMADO"
+            },
+            {
+              "origem": "payload.endereco.cidade",
+              "destino": "endereco.cidade",
+              "obrigatorio": true,
+              "ativo": true,
+              "padrao": "NAO INFORMADO"
+            },
+            {
+              "origem": "payload.endereco.uf",
+              "destino": "endereco.uf",
+              "obrigatorio": true,
+              "ativo": true,
+              "padrao": "SC",
+              "transformacao": "upper"
+            },
+            {
+              "origem": "payload.endereco.cep",
+              "destino": "endereco.cep",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": "00000000"
+            },
+            {
+              "origem": "payload.endereco.latitude",
+              "destino": "endereco.latitude",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": 0
+            },
+            {
+              "origem": "payload.endereco.longitude",
+              "destino": "endereco.longitude",
+              "obrigatorio": false,
+              "ativo": true,
+              "padrao": 0
+            },
+            {
+              "origem": "payload.dataadmissao",
+              "destino": "dataadmissao",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.matricula",
+              "destino": "matricula",
+              "obrigatorio": true,
+              "ativo": true,
+              "transformacao": "str"
+            }
+          ]
+        },
+        {
+          "id": "7a9f7d87-e68b-4793-baec-55ed578ecf3d",
+          "tipo": "afastamentos",
+          "endpoint": "/v1/afastamento",
+          "tabela_destino": "Afastamento",
+          "ativo": true,
+          "de_para": [
+            {
+              "origem": "payload.numerodaempresa",
+              "destino": "numerodaempresa",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.tipodecolaborador",
+              "destino": "tipodecolaborador",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.numerodeorigemdocolaborador",
+              "destino": "numerodeorigemdocolaborador",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.cpf",
+              "destino": "cpf",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.descricao",
+              "destino": "descricao",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.descricaodasituacao",
+              "destino": "descricaodasituacao",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.datainicio",
+              "destino": "datainicio",
+              "obrigatorio": true,
+              "ativo": true
+            },
+            {
+              "origem": "payload.dataafastamento",
+              "destino": "dataafastamento",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.horadoafastamento",
+              "destino": "horadoafastamento",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.datatermino",
+              "destino": "datatermino",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.horadotermino",
+              "destino": "horadotermino",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.situacao",
+              "destino": "situacao",
+              "obrigatorio": false,
+              "ativo": true
+            },
+            {
+              "origem": "payload.rescisao",
+              "destino": "rescisao",
+              "obrigatorio": false,
+              "ativo": true
+            }
+          ]
+        }
+      ]
     }
   ]
 }

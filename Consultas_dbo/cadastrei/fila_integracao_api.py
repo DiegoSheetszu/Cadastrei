@@ -109,6 +109,47 @@ class RepositorioFilaIntegracaoApi:
             },
         )
 
+    def buscar_colunas_motorista_por_evento(
+        self,
+        *,
+        evento: dict[str, Any],
+        colunas: list[str],
+    ) -> dict[str, Any]:
+        return self._buscar_colunas_evento(
+            table_name=self.tabela_motorista,
+            evento=evento,
+            requested_columns=colunas,
+            key_columns={
+                "id_de_origem": "IdDeOrigem",
+                "evento_tipo": "EventoTipo",
+                "versao_payload": "VersaoPayload",
+                "hash_payload": "HashPayload",
+            },
+            optional_key_columns={"numemp": "NumEmp"},
+        )
+
+    def buscar_colunas_afastamento_por_evento(
+        self,
+        *,
+        evento: dict[str, Any],
+        colunas: list[str],
+    ) -> dict[str, Any]:
+        return self._buscar_colunas_evento(
+            table_name=self.tabela_afastamento,
+            evento=evento,
+            requested_columns=colunas,
+            key_columns={
+                "numempresa": "NumeroDaEmpresa",
+                "tipocolaborador": "TipoDeColaborador",
+                "numorigem": "NumeroDeOrigemDoColaborador",
+                "dataafastamento": "DataDoAfastamento",
+                "situacao": "Situacao",
+                "evento_tipo": "EventoTipo",
+                "versao_payload": "VersaoPayload",
+                "hash_payload": "HashPayload",
+            },
+        )
+
     def marcar_motorista_sucesso(
         self,
         *,
@@ -222,6 +263,86 @@ class RepositorioFilaIntegracaoApi:
                 "hash_payload": "HashPayload",
             },
         )
+
+    def _buscar_colunas_evento(
+        self,
+        *,
+        table_name: str,
+        evento: dict[str, Any],
+        requested_columns: list[str],
+        key_columns: dict[str, str],
+        optional_key_columns: dict[str, str] | None = None,
+    ) -> dict[str, Any]:
+        cleaned_columns: list[str] = []
+        seen_columns: set[str] = set()
+        for column_name in requested_columns:
+            logical = str(column_name or "").strip()
+            if not logical:
+                continue
+            norm = _normalize_key(logical)
+            if not norm or norm in seen_columns:
+                continue
+            seen_columns.add(norm)
+            cleaned_columns.append(logical)
+
+        if not cleaned_columns:
+            return {}
+
+        requested_aliases = {f"sel_{idx}": col for idx, col in enumerate(cleaned_columns)}
+        resolved = self._resolver_colunas(
+            table_name,
+            required_columns={**key_columns},
+            optional_columns={**(optional_key_columns or {}), **requested_aliases},
+        )
+
+        select_parts: list[str] = []
+        for alias in requested_aliases.keys():
+            if alias in resolved:
+                select_parts.append(f"t.[{resolved[alias]}] AS [{alias}]")
+            else:
+                select_parts.append(f"NULL AS [{alias}]")
+        where_parts: list[str] = []
+        params: dict[str, Any] = {}
+
+        for alias in key_columns.keys():
+            value = evento.get(alias)
+            if value is None:
+                where_parts.append(f"t.[{resolved[alias]}] IS NULL")
+            else:
+                where_parts.append(f"t.[{resolved[alias]}] = :{alias}")
+                params[alias] = value
+
+        for alias in (optional_key_columns or {}).keys():
+            if alias not in resolved:
+                continue
+            value = evento.get(alias)
+            if value is None:
+                continue
+            where_parts.append(f"t.[{resolved[alias]}] = :{alias}")
+            params[alias] = value
+
+        if not where_parts:
+            return {}
+
+        sql = text(
+            f"""
+            SELECT TOP 1
+                {', '.join(select_parts)}
+            FROM [{self.schema}].[{table_name}] AS t
+            WHERE {' AND '.join(where_parts)}
+            """
+        )
+
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, params).mappings().first()
+
+        if not row:
+            return {}
+
+        return {
+            logical_name: row.get(alias_name)
+            for alias_name, logical_name in requested_aliases.items()
+        }
 
     def _capturar_lote(
         self,

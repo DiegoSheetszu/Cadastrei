@@ -17,6 +17,7 @@ class IntegracaoEndpoint:
     endpoint: str
     tabela_destino: str
     ativo: bool = True
+    de_para: list[dict[str, Any]] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -25,6 +26,7 @@ class IntegracaoEndpoint:
             "endpoint": self.endpoint,
             "tabela_destino": self.tabela_destino,
             "ativo": self.ativo,
+            "de_para": [dict(item) for item in (self.de_para or []) if isinstance(item, dict)],
         }
 
 
@@ -102,6 +104,7 @@ class IntegracaoRegistry:
                 tipo_value = str(ep.get("tipo") or "").strip()
                 if not endpoint_value or not tipo_value:
                     continue
+                de_para = self._sanitize_de_para(ep.get("de_para"))
                 clean_eps.append(
                     {
                         "id": str(ep.get("id") or "").strip() or str(uuid.uuid4()),
@@ -109,6 +112,7 @@ class IntegracaoRegistry:
                         "endpoint": endpoint_value,
                         "tabela_destino": str(ep.get("tabela_destino") or "").strip(),
                         "ativo": bool(ep.get("ativo", True)),
+                        "de_para": de_para,
                     }
                 )
             payload["endpoints"] = clean_eps
@@ -161,7 +165,7 @@ class IntegracaoRegistry:
     def default_config(self) -> IntegracaoClienteApi:
         return IntegracaoClienteApi(
             id="",
-            nome="Padrao .env",
+            nome="ATS (Padrao .env)",
             fornecedor="ATS_Log",
             base_url=str(settings.api_base_url or "").strip(),
             login_url=str(settings.api_login_url or "").strip(),
@@ -174,12 +178,14 @@ class IntegracaoRegistry:
                     tipo="motoristas",
                     endpoint=str(settings.api_motorista_endpoint or "").strip(),
                     tabela_destino=str(settings.target_motorista_table or "").strip(),
+                    de_para=self._default_de_para_motoristas(),
                 ),
                 IntegracaoEndpoint(
                     id=str(uuid.uuid4()),
                     tipo="afastamentos",
                     endpoint=str(settings.api_afastamento_endpoint or "").strip(),
                     tabela_destino=str(settings.target_afastamento_table or "").strip(),
+                    de_para=self._default_de_para_afastamentos(),
                 ),
             ],
         )
@@ -219,6 +225,7 @@ class IntegracaoRegistry:
                         "endpoint": ep_m,
                         "tabela_destino": str(settings.target_motorista_table or "").strip(),
                         "ativo": True,
+                        "de_para": IntegracaoRegistry._default_de_para_motoristas(),
                     }
                 )
             if ep_a:
@@ -229,6 +236,7 @@ class IntegracaoRegistry:
                         "endpoint": ep_a,
                         "tabela_destino": str(settings.target_afastamento_table or "").strip(),
                         "ativo": True,
+                        "de_para": IntegracaoRegistry._default_de_para_afastamentos(),
                     }
                 )
 
@@ -247,6 +255,7 @@ class IntegracaoRegistry:
                     endpoint=endpoint_value,
                     tabela_destino=str(ep.get("tabela_destino") or "").strip(),
                     ativo=bool(ep.get("ativo", True)),
+                    de_para=IntegracaoRegistry._sanitize_de_para(ep.get("de_para")),
                 )
             )
 
@@ -261,3 +270,76 @@ class IntegracaoRegistry:
             timeout_seconds=float(raw.get("timeout_seconds") or 30.0),
             endpoints=endpoints,
         )
+
+    @staticmethod
+    def _sanitize_de_para(raw_rules: Any) -> list[dict[str, Any]]:
+        if not isinstance(raw_rules, list):
+            return []
+
+        result: list[dict[str, Any]] = []
+        for rule in raw_rules:
+            if not isinstance(rule, dict):
+                continue
+
+            origem = str(rule.get("origem") or rule.get("source") or rule.get("from") or "").strip()
+            destino = str(rule.get("destino") or rule.get("target") or rule.get("to") or "").strip()
+            if not destino:
+                continue
+
+            clean_rule: dict[str, Any] = {
+                "origem": origem,
+                "destino": destino,
+                "obrigatorio": bool(rule.get("obrigatorio", rule.get("required", False))),
+                "ativo": bool(rule.get("ativo", rule.get("enabled", True))),
+            }
+
+            if "padrao" in rule:
+                clean_rule["padrao"] = rule.get("padrao")
+            elif "default" in rule:
+                clean_rule["padrao"] = rule.get("default")
+
+            transformacao = str(rule.get("transformacao") or rule.get("transform") or "").strip()
+            if transformacao:
+                clean_rule["transformacao"] = transformacao
+
+            result.append(clean_rule)
+
+        return result
+
+    @staticmethod
+    def _default_de_para_motoristas() -> list[dict[str, Any]]:
+        return [
+            {"origem": "payload.nome", "destino": "nome", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.cpf", "destino": "cpf", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.datanascimento", "destino": "datanascimento", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.genero", "destino": "genero", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.endereco.rua", "destino": "endereco.rua", "obrigatorio": False, "ativo": True, "padrao": "NAO INFORMADO"},
+            {"origem": "payload.endereco.numero", "destino": "endereco.numero", "obrigatorio": False, "ativo": True, "padrao": "SN"},
+            {"origem": "payload.endereco.complemento", "destino": "endereco.complemento", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.endereco.bairro", "destino": "endereco.bairro", "obrigatorio": False, "ativo": True, "padrao": "NAO INFORMADO"},
+            {"origem": "payload.endereco.cidade", "destino": "endereco.cidade", "obrigatorio": True, "ativo": True, "padrao": "NAO INFORMADO"},
+            {"origem": "payload.endereco.uf", "destino": "endereco.uf", "obrigatorio": True, "ativo": True, "transformacao": "upper", "padrao": "SC"},
+            {"origem": "payload.endereco.cep", "destino": "endereco.cep", "obrigatorio": False, "ativo": True, "padrao": "00000000"},
+            {"origem": "payload.endereco.latitude", "destino": "endereco.latitude", "obrigatorio": False, "ativo": True, "padrao": 0},
+            {"origem": "payload.endereco.longitude", "destino": "endereco.longitude", "obrigatorio": False, "ativo": True, "padrao": 0},
+            {"origem": "payload.dataadmissao", "destino": "dataadmissao", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.matricula", "destino": "matricula", "obrigatorio": True, "ativo": True, "transformacao": "str"},
+        ]
+
+    @staticmethod
+    def _default_de_para_afastamentos() -> list[dict[str, Any]]:
+        return [
+            {"origem": "payload.numerodaempresa", "destino": "numerodaempresa", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.tipodecolaborador", "destino": "tipodecolaborador", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.numerodeorigemdocolaborador", "destino": "numerodeorigemdocolaborador", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.cpf", "destino": "cpf", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.descricao", "destino": "descricao", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.descricaodasituacao", "destino": "descricaodasituacao", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.datainicio", "destino": "datainicio", "obrigatorio": True, "ativo": True},
+            {"origem": "payload.dataafastamento", "destino": "dataafastamento", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.horadoafastamento", "destino": "horadoafastamento", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.datatermino", "destino": "datatermino", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.horadotermino", "destino": "horadotermino", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.situacao", "destino": "situacao", "obrigatorio": False, "ativo": True},
+            {"origem": "payload.rescisao", "destino": "rescisao", "obrigatorio": False, "ativo": True},
+        ]

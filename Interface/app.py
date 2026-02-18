@@ -86,6 +86,10 @@ class IntegracaoApp(BaseWindow):
         self.win_service_api_afastamentos_opcoes = self._unique(
             [settings.win_service_api_afastamentos_dev, settings.win_service_api_afastamentos_prod]
         )
+        self.endpoint_tipo_opcoes = ["motoristas", "afastamentos"]
+        self.endpoint_tabela_opcoes = self._unique(
+            [settings.target_motorista_table, settings.target_afastamento_table]
+        )
 
         self.database_var = tk.StringVar(value=self.origens_opcoes[0])
         self.database_destino_var = tk.StringVar(value=self.destinos_opcoes[0])
@@ -124,6 +128,7 @@ class IntegracaoApp(BaseWindow):
         self.servicos_status_var = tk.StringVar(value="Servicos locais: motoristas=OFF afastamentos=OFF")
         self.windows_services_status_var = tk.StringVar(value="Windows Sync: motoristas=? afastamentos=?")
         self.windows_api_services_status_var = tk.StringVar(value="Windows API: motoristas=? afastamentos=?")
+        self.main_maximize_text_var = tk.StringVar(value="Maximizar")
 
         self.monitor_api_motoristas_var = tk.StringVar(value="Motoristas: aguardando atualizacao")
         self.monitor_api_afastamentos_var = tk.StringVar(value="Afastamentos: aguardando atualizacao")
@@ -140,14 +145,33 @@ class IntegracaoApp(BaseWindow):
         self.int_base_url_var = tk.StringVar(value="")
         self.int_usuario_var = tk.StringVar(value="")
         self.int_senha_var = tk.StringVar(value="")
-        self.int_endpoint_tipo_var = tk.StringVar(value="")
+        self.int_endpoint_tipo_var = tk.StringVar(value=self.endpoint_tipo_opcoes[0])
         self.int_endpoint_path_var = tk.StringVar(value="")
-        self.int_endpoint_tabela_var = tk.StringVar(value="")
+        self.int_endpoint_tabela_var = tk.StringVar(value=settings.target_motorista_table)
         self.int_endpoint_ativo_var = tk.BooleanVar(value=True)
+        self.int_map_origem_var = tk.StringVar(value="")
+        self.int_map_destino_var = tk.StringVar(value="")
+        self.int_map_padrao_var = tk.StringVar(value="")
+        self.int_map_transformacao_var = tk.StringVar(value="")
+        self.int_map_obrigatorio_var = tk.BooleanVar(value=False)
+        self.int_map_ativo_var = tk.BooleanVar(value=True)
+        self.map_selected_index: int | None = None
+        self.map_transformacoes_opcoes = [
+            "",
+            "str",
+            "upper",
+            "lower",
+            "int",
+            "float",
+            "bool",
+            "cpf_digits",
+            "date_yyyy_mm_dd",
+        ]
         self.int_timeout_var = tk.StringVar(value=str(settings.api_timeout_seconds))
 
         self._setup_styles()
         self._build_ui()
+        self._garantir_cadastro_api_padrao()
         self._carregar_configs_integracao(log_line=False)
         self.after(300, lambda: self._run_async(self._atualizacao_inicial, channel="api"))
         self.after(1000, self._agendar_monitoramento_periodico)
@@ -252,6 +276,9 @@ class IntegracaoApp(BaseWindow):
         self.api_status_label = ttk.Label(top, textvariable=self.api_exec_status_var, style="StatusIdle.TLabel")
         self.api_status_label.grid(row=0, column=12, padx=(0, 8), sticky="w")
         ttk.Label(top, textvariable=self.cliente_api_ativo_var).grid(row=0, column=13, padx=(10, 0), sticky="w")
+        ttk.Button(top, textvariable=self.main_maximize_text_var, command=self._toggle_main_window).grid(
+            row=0, column=14, padx=(10, 0), sticky="e"
+        )
 
         self.notebook = ttk.Notebook(self)
         self.notebook.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 8))
@@ -752,8 +779,8 @@ class IntegracaoApp(BaseWindow):
 
         dialog = tk.Toplevel(self)
         dialog.title("Cadastro de Integracao API" if item is None else f"Detalhes da Integracao: {item.nome}")
-        dialog.geometry("980x720")
-        dialog.minsize(880, 640)
+        dialog.geometry("1220x840")
+        dialog.minsize(1080, 760)
         dialog.transient(self)
         dialog.grab_set()
         dialog.columnconfigure(0, weight=1)
@@ -763,12 +790,18 @@ class IntegracaoApp(BaseWindow):
         topo = ttk.Frame(dialog, padding=(12, 12, 12, 6))
         topo.grid(row=0, column=0, sticky="ew")
         topo.columnconfigure(0, weight=1)
+        dialog_maximize_text_var = tk.StringVar(value="Maximizar")
         ttk.Label(topo, text="Configuracao da Integracao", style="Title.TLabel").grid(row=0, column=0, sticky="w")
         ttk.Label(
             topo,
             text="Preencha autenticacao e endpoints; use 'Testar login' antes de salvar.",
             style="SubTitle.TLabel",
         ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        ttk.Button(
+            topo,
+            textvariable=dialog_maximize_text_var,
+            command=lambda: self._toggle_window_maximize(dialog, dialog_maximize_text_var),
+        ).grid(row=0, column=1, rowspan=2, sticky="e")
 
         corpo = ttk.Frame(dialog, padding=(12, 0, 12, 8))
         corpo.grid(row=1, column=0, sticky="nsew")
@@ -801,38 +834,167 @@ class IntegracaoApp(BaseWindow):
         bloco_endpoint.grid(row=2, column=0, sticky="nsew")
         bloco_endpoint.columnconfigure(0, weight=1)
         bloco_endpoint.rowconfigure(2, weight=1)
+        bloco_endpoint.rowconfigure(3, weight=1)
 
         form_ep = ttk.Frame(bloco_endpoint)
         form_ep.grid(row=0, column=0, sticky="ew")
         form_ep.columnconfigure(1, weight=1)
         ttk.Label(form_ep, text="Tipo endpoint:").grid(row=0, column=0, sticky="w")
-        ttk.Entry(form_ep, textvariable=self.int_endpoint_tipo_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        tipo_combo = ttk.Combobox(
+            form_ep,
+            textvariable=self.int_endpoint_tipo_var,
+            values=self.endpoint_tipo_opcoes,
+            state="readonly",
+        )
+        tipo_combo.grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        tipo_combo.bind("<<ComboboxSelected>>", self._on_endpoint_tipo_change)
         ttk.Label(form_ep, text="Path endpoint:").grid(row=0, column=2, sticky="w")
         ttk.Entry(form_ep, textvariable=self.int_endpoint_path_var, width=34).grid(row=0, column=3, sticky="ew", padx=(8, 8))
         ttk.Label(form_ep, text="Tabela destino:").grid(row=1, column=0, sticky="w", pady=(6, 0))
-        ttk.Entry(form_ep, textvariable=self.int_endpoint_tabela_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
+        ttk.Combobox(
+            form_ep,
+            textvariable=self.int_endpoint_tabela_var,
+            values=self.endpoint_tabela_opcoes,
+            state="readonly",
+        ).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
         ttk.Checkbutton(form_ep, text="Ativo", variable=self.int_endpoint_ativo_var).grid(row=1, column=2, sticky="w", pady=(6, 0))
 
         botoes_ep = ttk.Frame(bloco_endpoint)
         botoes_ep.grid(row=1, column=0, sticky="ew", pady=(8, 8))
-        ttk.Button(botoes_ep, text="Adicionar/Atualizar endpoint", command=self._upsert_endpoint_form).grid(row=0, column=0, padx=(0, 6))
-        ttk.Button(botoes_ep, text="Remover endpoint", command=self._remover_endpoint_form).grid(row=0, column=1, padx=(0, 6))
-        ttk.Button(botoes_ep, text="Limpar endpoint", command=self._limpar_endpoint_form).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(
+            botoes_ep,
+            text="Adicionar/Atualizar endpoint",
+            command=lambda: self._executar_acao_dialog(self._upsert_endpoint_form),
+        ).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(
+            botoes_ep,
+            text="Remover endpoint",
+            command=lambda: self._executar_acao_dialog(self._remover_endpoint_form),
+        ).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(
+            botoes_ep,
+            text="Limpar endpoint",
+            command=lambda: self._executar_acao_dialog(self._limpar_endpoint_form),
+        ).grid(row=0, column=2, padx=(0, 6))
 
-        ep_cols = ("tipo", "endpoint", "tabela", "ativo")
+        ep_cols = ("tipo", "endpoint", "tabela", "mapeamentos", "ativo")
         self.endpoint_tree = ttk.Treeview(bloco_endpoint, columns=ep_cols, show="headings", height=10)
         self.endpoint_tree.grid(row=2, column=0, sticky="nsew")
         self.endpoint_tree.bind("<<TreeviewSelect>>", self._on_endpoint_item_select)
         self.endpoint_tree.bind("<Double-1>", self._on_endpoint_item_select)
         for col, title, width in (
             ("tipo", "Tipo", 150),
-            ("endpoint", "Endpoint", 370),
+            ("endpoint", "Endpoint", 340),
             ("tabela", "Tabela", 190),
+            ("mapeamentos", "De-para", 90),
             ("ativo", "Ativo", 70),
         ):
             self.endpoint_tree.heading(col, text=title)
             self.endpoint_tree.column(col, width=width, anchor="w")
         self._render_endpoint_tree()
+
+        bloco_mapa = ttk.LabelFrame(
+            bloco_endpoint,
+            text="De-para do Endpoint Selecionado (coluna da tabela -> campo do endpoint)",
+            padding=10,
+        )
+        bloco_mapa.grid(row=3, column=0, sticky="nsew", pady=(10, 0))
+        bloco_mapa.columnconfigure(0, weight=1)
+        bloco_mapa.rowconfigure(3, weight=1)
+
+        form_map = ttk.Frame(bloco_mapa)
+        form_map.grid(row=0, column=0, sticky="ew")
+        form_map.columnconfigure(1, weight=1)
+        form_map.columnconfigure(3, weight=1)
+
+        ttk.Label(form_map, text="Coluna origem:").grid(row=0, column=0, sticky="w")
+        self.map_origem_combo = ttk.Combobox(
+            form_map,
+            textvariable=self.int_map_origem_var,
+            state="normal",
+            width=34,
+        )
+        self.map_origem_combo.grid(row=0, column=1, sticky="ew", padx=(8, 10))
+
+        ttk.Label(form_map, text="Campo destino:").grid(row=0, column=2, sticky="w")
+        ttk.Entry(form_map, textvariable=self.int_map_destino_var).grid(row=0, column=3, sticky="ew", padx=(8, 0))
+
+        ttk.Label(form_map, text="Padrao:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form_map, textvariable=self.int_map_padrao_var).grid(row=1, column=1, sticky="ew", padx=(8, 10), pady=(6, 0))
+
+        ttk.Label(form_map, text="Transformacao:").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Combobox(
+            form_map,
+            textvariable=self.int_map_transformacao_var,
+            values=self.map_transformacoes_opcoes,
+            state="readonly",
+            width=24,
+        ).grid(row=1, column=3, sticky="w", padx=(8, 0), pady=(6, 0))
+
+        ttk.Checkbutton(form_map, text="Obrigatorio", variable=self.int_map_obrigatorio_var).grid(
+            row=2, column=0, sticky="w", pady=(6, 0)
+        )
+        ttk.Checkbutton(form_map, text="Ativo", variable=self.int_map_ativo_var).grid(
+            row=2, column=1, sticky="w", pady=(6, 0)
+        )
+
+        ttk.Label(
+            bloco_mapa,
+            text=(
+                "Selecione um endpoint acima. A coluna origem gera automaticamente origem='colunas.<Coluna>'. "
+                "Se preferir, voce pode digitar caminho manual."
+            ),
+            style="SubTitle.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(6, 4))
+
+        botoes_mapa = ttk.Frame(bloco_mapa)
+        botoes_mapa.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        ttk.Button(
+            botoes_mapa,
+            text="Carregar colunas",
+            command=lambda: self._executar_acao_dialog(self._recarregar_colunas_de_para_interativo),
+        ).grid(
+            row=0, column=0, padx=(0, 10)
+        )
+        ttk.Button(
+            botoes_mapa,
+            text="Adicionar/Atualizar de-para",
+            command=lambda: self._executar_acao_dialog(self._upsert_de_para_form),
+        ).grid(
+            row=0, column=1, padx=(0, 6)
+        )
+        ttk.Button(
+            botoes_mapa,
+            text="Remover de-para",
+            command=lambda: self._executar_acao_dialog(self._remover_de_para_form),
+        ).grid(
+            row=0, column=2, padx=(0, 6)
+        )
+        ttk.Button(
+            botoes_mapa,
+            text="Limpar de-para",
+            command=lambda: self._executar_acao_dialog(self._limpar_de_para_form),
+        ).grid(
+            row=0, column=3, padx=(0, 6)
+        )
+
+        map_cols = ("origem", "destino", "obrigatorio", "ativo", "padrao", "transformacao")
+        self.map_tree = ttk.Treeview(bloco_mapa, columns=map_cols, show="headings", height=9)
+        self.map_tree.grid(row=3, column=0, sticky="nsew")
+        self.map_tree.bind("<<TreeviewSelect>>", self._on_de_para_item_select)
+        self.map_tree.bind("<Double-1>", self._on_de_para_item_select)
+        for col, title, width in (
+            ("origem", "Origem", 240),
+            ("destino", "Destino", 240),
+            ("obrigatorio", "Obrigatorio", 90),
+            ("ativo", "Ativo", 70),
+            ("padrao", "Padrao", 140),
+            ("transformacao", "Transformacao", 130),
+        ):
+            self.map_tree.heading(col, text=title)
+            self.map_tree.column(col, width=width, anchor="w")
+        self._render_de_para_tree()
+        self._atualizar_opcoes_colunas_de_para(log_line=False)
 
         rodape = ttk.Frame(dialog, padding=(12, 0, 12, 12))
         rodape.grid(row=2, column=0, sticky="ew")
@@ -854,6 +1016,13 @@ class IntegracaoApp(BaseWindow):
             self._set_status(f"Status: erro ao salvar integracao - {exc}")
             self._log_api(str(exc), level="ERROR")
 
+    def _executar_acao_dialog(self, acao) -> None:
+        try:
+            acao()
+        except Exception as exc:
+            self._set_status(f"Status: erro - {exc}")
+            self._log_api(str(exc), level="WARN")
+
     def _fechar_dialog_integracao(self, dialog: tk.Toplevel) -> None:
         try:
             dialog.destroy()
@@ -863,6 +1032,53 @@ class IntegracaoApp(BaseWindow):
                     delattr(self, "endpoint_tree")
                 except Exception:
                     pass
+            if hasattr(self, "map_tree"):
+                try:
+                    delattr(self, "map_tree")
+                except Exception:
+                    pass
+            if hasattr(self, "map_origem_combo"):
+                try:
+                    delattr(self, "map_origem_combo")
+                except Exception:
+                    pass
+
+    @staticmethod
+    def _window_esta_maximizada(window: tk.Misc) -> bool:
+        try:
+            if str(window.state()).lower() == "zoomed":
+                return True
+        except Exception:
+            pass
+        try:
+            return bool(window.attributes("-zoomed"))
+        except Exception:
+            return False
+
+    @staticmethod
+    def _set_window_maximized(window: tk.Misc, maximizar: bool) -> None:
+        try:
+            window.state("zoomed" if maximizar else "normal")
+            return
+        except Exception:
+            pass
+        try:
+            window.attributes("-zoomed", bool(maximizar))
+        except Exception:
+            return
+
+    def _atualizar_rotulo_maximizacao(self, window: tk.Misc, rotulo: tk.StringVar | None) -> None:
+        if rotulo is None:
+            return
+        rotulo.set("Restaurar" if self._window_esta_maximizada(window) else "Maximizar")
+
+    def _toggle_window_maximize(self, window: tk.Misc, rotulo: tk.StringVar | None = None) -> None:
+        maximizar = not self._window_esta_maximizada(window)
+        self._set_window_maximized(window, maximizar)
+        self._atualizar_rotulo_maximizacao(window, rotulo)
+
+    def _toggle_main_window(self) -> None:
+        self._toggle_window_maximize(self, self.main_maximize_text_var)
 
     def _config_from_form(self) -> IntegracaoClienteApi:
         nome = (self.int_nome_var.get() or "").strip()
@@ -944,15 +1160,22 @@ class IntegracaoApp(BaseWindow):
         self._set_status(f"Status: testando login ({cfg.nome})...")
         auth = login_api(timeout=cfg.timeout_seconds, config=cfg.to_runtime_dict())
         exp = auth.get("exp")
+        login_url_efetiva = auth.get("_login_url")
         self._set_status("Status: login testado com sucesso")
-        self._log_api(f"Login ok para cliente '{cfg.nome}'. Expira em: {exp}")
+        if login_url_efetiva:
+            self._log_api(f"Login ok para cliente '{cfg.nome}' em {login_url_efetiva}. Expira em: {exp}")
+        else:
+            self._log_api(f"Login ok para cliente '{cfg.nome}'. Expira em: {exp}")
 
     def _limpar_endpoint_form(self) -> None:
         self.endpoint_selected_id = None
-        self.int_endpoint_tipo_var.set("")
+        self.int_endpoint_tipo_var.set(self.endpoint_tipo_opcoes[0])
         self.int_endpoint_path_var.set("")
-        self.int_endpoint_tabela_var.set("")
+        self.int_endpoint_tabela_var.set(settings.target_motorista_table)
         self.int_endpoint_ativo_var.set(True)
+        self._limpar_de_para_form()
+        self._render_de_para_tree()
+        self._atualizar_opcoes_colunas_de_para(log_line=False)
 
     def _upsert_endpoint_form(self) -> None:
         tipo = (self.int_endpoint_tipo_var.get() or "").strip()
@@ -964,12 +1187,18 @@ class IntegracaoApp(BaseWindow):
             raise ValueError("Informe o path do endpoint.")
 
         ep_id = str(self.endpoint_selected_id or "").strip()
+        de_para_atual: list[dict[str, Any]] = []
+        if ep_id:
+            existente = next((x for x in self.current_endpoints if x.id == ep_id), None)
+            if existente is not None:
+                de_para_atual = [dict(item) for item in (existente.de_para or []) if isinstance(item, dict)]
         novo = IntegracaoEndpoint(
             id=ep_id or str(uuid.uuid4()),
             tipo=tipo,
             endpoint=endpoint,
             tabela_destino=tabela,
             ativo=bool(self.int_endpoint_ativo_var.get()),
+            de_para=de_para_atual,
         )
 
         atualizado = False
@@ -982,7 +1211,10 @@ class IntegracaoApp(BaseWindow):
             self.current_endpoints.append(novo)
 
         self._render_endpoint_tree()
-        self._limpar_endpoint_form()
+        self.endpoint_selected_id = novo.id
+        self._limpar_de_para_form()
+        self._atualizar_opcoes_colunas_de_para(log_line=False)
+        self._render_de_para_tree()
 
     def _remover_endpoint_form(self) -> None:
         if not self.endpoint_selected_id:
@@ -1006,6 +1238,9 @@ class IntegracaoApp(BaseWindow):
         self.int_endpoint_path_var.set(ep.endpoint)
         self.int_endpoint_tabela_var.set(ep.tabela_destino)
         self.int_endpoint_ativo_var.set(ep.ativo)
+        self._limpar_de_para_form()
+        self._atualizar_opcoes_colunas_de_para(log_line=True)
+        self._render_de_para_tree()
 
     def _render_endpoint_tree(self) -> None:
         if not hasattr(self, "endpoint_tree") or not self.endpoint_tree.winfo_exists():
@@ -1016,8 +1251,220 @@ class IntegracaoApp(BaseWindow):
                 "",
                 tk.END,
                 iid=ep.id,
-                values=(ep.tipo, ep.endpoint, ep.tabela_destino, "Sim" if ep.ativo else "Nao"),
+                values=(
+                    ep.tipo,
+                    ep.endpoint,
+                    ep.tabela_destino,
+                    len([item for item in (ep.de_para or []) if isinstance(item, dict)]),
+                    "Sim" if ep.ativo else "Nao",
+                ),
             )
+        if self.endpoint_selected_id and self.endpoint_tree.exists(self.endpoint_selected_id):
+            self.endpoint_tree.selection_set(self.endpoint_selected_id)
+            self.endpoint_tree.focus(self.endpoint_selected_id)
+
+    def _endpoint_atual_selecionado(self) -> IntegracaoEndpoint | None:
+        if not self.endpoint_selected_id:
+            return None
+        return next((ep for ep in self.current_endpoints if ep.id == self.endpoint_selected_id), None)
+
+    def _on_endpoint_tipo_change(self, _event=None) -> None:
+        tipo_norm = self._normalizar_tipo_endpoint(self.int_endpoint_tipo_var.get())
+        if tipo_norm in {"afastamentos", "afastamento"}:
+            self.int_endpoint_tabela_var.set(settings.target_afastamento_table)
+        else:
+            self.int_endpoint_tabela_var.set(settings.target_motorista_table)
+        self._atualizar_opcoes_colunas_de_para(log_line=False)
+
+    def _tabela_destino_endpoint(self, endpoint: IntegracaoEndpoint | None) -> str:
+        if endpoint is None:
+            return ""
+        tabela = str(endpoint.tabela_destino or "").strip()
+        if tabela:
+            return tabela
+        tipo_norm = self._normalizar_tipo_endpoint(endpoint.tipo)
+        if tipo_norm in {"afastamentos", "afastamento"}:
+            return settings.target_afastamento_table
+        return settings.target_motorista_table
+
+    def _carregar_opcoes_colunas_de_para(self, endpoint: IntegracaoEndpoint | None) -> list[str]:
+        tabela = self._tabela_destino_endpoint(endpoint)
+        if not tabela:
+            return []
+        lookup = self._carregar_colunas_tabela(tabela)
+        return sorted(lookup.values())
+
+    def _atualizar_opcoes_colunas_de_para(self, *, log_line: bool) -> list[str]:
+        if not hasattr(self, "map_origem_combo") or not self.map_origem_combo.winfo_exists():
+            return []
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            self.map_origem_combo.configure(values=[])
+            return []
+
+        try:
+            opcoes = self._carregar_opcoes_colunas_de_para(endpoint)
+        except Exception as exc:
+            self.map_origem_combo.configure(values=[])
+            if log_line:
+                raise
+            opcoes = []
+            self._log_api(f"Falha ao carregar colunas para de-para: {exc}", level="WARN")
+
+        self.map_origem_combo.configure(values=opcoes)
+        if opcoes and not str(self.int_map_origem_var.get() or "").strip():
+            self.int_map_origem_var.set(opcoes[0])
+        return opcoes
+
+    def _recarregar_colunas_de_para_interativo(self) -> None:
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            raise ValueError("Selecione um endpoint para carregar as colunas.")
+        opcoes = self._atualizar_opcoes_colunas_de_para(log_line=True)
+        tabela = self._tabela_destino_endpoint(endpoint)
+        if not opcoes:
+            raise ValueError(f"Nenhuma coluna encontrada em [{settings.target_schema}].[{tabela}]")
+        self._log_api(
+            f"Colunas carregadas para de-para: tabela=[{settings.target_schema}].[{tabela}] total={len(opcoes)}"
+        )
+
+    def _limpar_de_para_form(self) -> None:
+        self.map_selected_index = None
+        self.int_map_origem_var.set("")
+        self.int_map_destino_var.set("")
+        self.int_map_padrao_var.set("")
+        self.int_map_transformacao_var.set("")
+        self.int_map_obrigatorio_var.set(False)
+        self.int_map_ativo_var.set(True)
+
+    @staticmethod
+    def _normalizar_origem_coluna(origem: str) -> str:
+        text_value = str(origem or "").strip()
+        if not text_value:
+            return ""
+        if text_value.lower().startswith("colunas."):
+            return text_value
+        return f"colunas.{text_value}"
+
+    def _render_de_para_tree(self) -> None:
+        if not hasattr(self, "map_tree") or not self.map_tree.winfo_exists():
+            return
+        self.map_tree.delete(*self.map_tree.get_children())
+
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            return
+
+        de_para = [item for item in (endpoint.de_para or []) if isinstance(item, dict)]
+        for idx, regra in enumerate(de_para):
+            origem = str(regra.get("origem") or "").strip()
+            origem_view = origem.split(".", 1)[1] if origem.lower().startswith("colunas.") else origem
+            self.map_tree.insert(
+                "",
+                tk.END,
+                iid=str(idx),
+                values=(
+                    origem_view,
+                    str(regra.get("destino") or "").strip(),
+                    "Sim" if bool(regra.get("obrigatorio", False)) else "Nao",
+                    "Sim" if bool(regra.get("ativo", True)) else "Nao",
+                    str(regra.get("padrao") if "padrao" in regra else "").strip(),
+                    str(regra.get("transformacao") or "").strip(),
+                ),
+            )
+
+    def _on_de_para_item_select(self, _event=None) -> None:
+        if not hasattr(self, "map_tree") or not self.map_tree.winfo_exists():
+            return
+        selected = self.map_tree.selection()
+        if not selected:
+            return
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            return
+
+        try:
+            idx = int(selected[0])
+        except Exception:
+            return
+
+        regras = [item for item in (endpoint.de_para or []) if isinstance(item, dict)]
+        if idx < 0 or idx >= len(regras):
+            return
+
+        regra = regras[idx]
+        origem = str(regra.get("origem") or "").strip()
+        origem_view = origem.split(".", 1)[1] if origem.lower().startswith("colunas.") else origem
+        self.map_selected_index = idx
+        self.int_map_origem_var.set(origem_view)
+        self.int_map_destino_var.set(str(regra.get("destino") or "").strip())
+        self.int_map_padrao_var.set(str(regra.get("padrao") if "padrao" in regra else "").strip())
+        self.int_map_transformacao_var.set(str(regra.get("transformacao") or "").strip())
+        self.int_map_obrigatorio_var.set(bool(regra.get("obrigatorio", False)))
+        self.int_map_ativo_var.set(bool(regra.get("ativo", True)))
+
+    def _upsert_de_para_form(self) -> None:
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            raise ValueError("Selecione um endpoint para configurar o de-para.")
+
+        origem_input = (self.int_map_origem_var.get() or "").strip()
+        destino = (self.int_map_destino_var.get() or "").strip()
+        if not origem_input:
+            raise ValueError("Informe a coluna/caminho de origem.")
+        if not destino:
+            raise ValueError("Informe o campo de destino.")
+
+        opcoes_colunas = self._atualizar_opcoes_colunas_de_para(log_line=True)
+        origem = origem_input
+        if not origem_input.lower().startswith("colunas.") and "." not in origem_input and ":" not in origem_input:
+            coluna_resolvida = origem_input
+            for coluna in opcoes_colunas:
+                if self._normalize_key(coluna) == self._normalize_key(origem_input):
+                    coluna_resolvida = coluna
+                    break
+            origem = self._normalizar_origem_coluna(coluna_resolvida)
+
+        regra: dict[str, Any] = {
+            "origem": origem,
+            "destino": destino,
+            "obrigatorio": bool(self.int_map_obrigatorio_var.get()),
+            "ativo": bool(self.int_map_ativo_var.get()),
+        }
+
+        padrao = (self.int_map_padrao_var.get() or "").strip()
+        if padrao:
+            regra["padrao"] = padrao
+
+        transformacao = (self.int_map_transformacao_var.get() or "").strip()
+        if transformacao:
+            regra["transformacao"] = transformacao
+
+        regras = [dict(item) for item in (endpoint.de_para or []) if isinstance(item, dict)]
+        if self.map_selected_index is not None and 0 <= self.map_selected_index < len(regras):
+            regras[self.map_selected_index] = regra
+        else:
+            regras.append(regra)
+
+        endpoint.de_para = regras
+        self._render_endpoint_tree()
+        self._render_de_para_tree()
+        self._limpar_de_para_form()
+
+    def _remover_de_para_form(self) -> None:
+        endpoint = self._endpoint_atual_selecionado()
+        if endpoint is None:
+            raise ValueError("Selecione um endpoint para remover o de-para.")
+        if self.map_selected_index is None:
+            raise ValueError("Selecione um de-para para remover.")
+
+        regras = [dict(item) for item in (endpoint.de_para or []) if isinstance(item, dict)]
+        if 0 <= self.map_selected_index < len(regras):
+            del regras[self.map_selected_index]
+        endpoint.de_para = regras
+        self._render_endpoint_tree()
+        self._render_de_para_tree()
+        self._limpar_de_para_form()
 
     def _carregar_configs_integracao(self, *, log_line: bool = False) -> None:
         self.integracao_items = self.registry.list_configs()
@@ -1075,6 +1522,42 @@ class IntegracaoApp(BaseWindow):
     def _config_api_ativa(self) -> dict[str, Any] | None:
         active = self.registry.get_active()
         return active.to_runtime_dict() if active else None
+
+    def _garantir_cadastro_api_padrao(self) -> None:
+        try:
+            items = self.registry.list_configs()
+            nomes_ats = {"ats (padrao .env)", "ats", "padrao .env"}
+            default_cfg = self.registry.default_config()
+            defaults_por_tipo: dict[str, list[dict[str, Any]]] = {}
+            for ep in (default_cfg.endpoints or []):
+                tipo_norm = self._normalizar_tipo_endpoint(ep.tipo)
+                defaults_por_tipo[tipo_norm] = [dict(item) for item in (ep.de_para or []) if isinstance(item, dict)]
+
+            ats_items = [
+                x for x in items
+                if str(x.nome or "").strip().lower() in nomes_ats
+            ]
+            if ats_items:
+                for ats_cfg in ats_items:
+                    changed = False
+                    for ep in (ats_cfg.endpoints or []):
+                        tipo_norm = self._normalizar_tipo_endpoint(ep.tipo)
+                        if ep.de_para:
+                            continue
+                        default_map = defaults_por_tipo.get(tipo_norm) or []
+                        if not default_map:
+                            continue
+                        ep.de_para = [dict(item) for item in default_map]
+                        changed = True
+                    if changed:
+                        self.registry.upsert(ats_cfg)
+                return
+
+            saved = self.registry.upsert(default_cfg)
+            if not self.registry.get_active_id():
+                self.registry.set_active(saved.id)
+        except Exception:
+            return
 
     def _run_async(self, target, *, channel: str = "sync") -> None:
         with self._busy_lock:
@@ -1471,7 +1954,7 @@ class IntegracaoApp(BaseWindow):
             endpoints = [ep for ep in endpoints if str(ep.get("tipo_normalizado") or "") in tipos_permitidos]
 
         if not endpoints:
-            raise ValueError("Nenhum endpoint ativo compatível com o tipo selecionado.")
+            raise ValueError("Nenhum endpoint ativo compativel com o tipo selecionado.")
 
         total_ok_m = 0
         total_ok_a = 0
@@ -1511,6 +1994,7 @@ class IntegracaoApp(BaseWindow):
                 processar_motoristas=processa_m,
                 processar_afastamentos=processa_a,
                 integration_config=cfg,
+                payload_mapping=ep.get("de_para"),
             )
 
             try:
@@ -1564,6 +2048,7 @@ class IntegracaoApp(BaseWindow):
                     "tipo_normalizado": self._normalizar_tipo_endpoint(tipo),
                     "endpoint": endpoint_path,
                     "tabela_destino": str(ep.get("tabela_destino") or "").strip(),
+                    "de_para": [dict(item) for item in (ep.get("de_para") or []) if isinstance(item, dict)],
                 }
             )
 
@@ -1577,12 +2062,14 @@ class IntegracaoApp(BaseWindow):
                 "tipo_normalizado": "motoristas",
                 "endpoint": str(settings.api_motorista_endpoint),
                 "tabela_destino": str(settings.target_motorista_table),
+                "de_para": [],
             },
             {
                 "tipo": "afastamentos",
                 "tipo_normalizado": "afastamentos",
                 "endpoint": str(settings.api_afastamento_endpoint),
                 "tabela_destino": str(settings.target_afastamento_table),
+                "de_para": [],
             },
         ]
 
