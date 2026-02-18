@@ -1,0 +1,17 @@
+{
+  "active_id": "9cb0e976-2ce4-441e-bbc0-5eb41140cfec",
+  "items": [
+    {
+      "id": "9cb0e976-2ce4-441e-bbc0-5eb41140cfec",
+      "nome": "ATS",
+      "fornecedor": "ATS_Log",
+      "base_url": "",
+      "login_url": "https://servicedesk.atslog.com.br:8088/login",
+      "usuario": "atslog.teste",
+      "senha": "teste@123",
+      "endpoint_motorista": "/v1/motorista",
+      "endpoint_afastamento": "/v1/afastamento",
+      "timeout_seconds": 30.0
+    }
+  ]
+}
