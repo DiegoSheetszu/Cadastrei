@@ -1,19 +1,29 @@
-from typing import Any, Dict
+from typing import Any, Dict, Mapping
 
 import httpx
 
 from config.settings import settings
 
 
-def login_api(timeout: float = 30.0) -> Dict[str, Any]:
-    if not settings.api_login_url:
+def _cfg_get(config: Mapping[str, Any] | None, key: str, default: str) -> str:
+    if config is None:
+        return str(default or "").strip()
+    return str(config.get(key) or default or "").strip()
+
+
+def login_api(timeout: float = 30.0, config: Mapping[str, Any] | None = None) -> Dict[str, Any]:
+    login_url = _cfg_get(config, "login_url", settings.api_login_url)
+    user = _cfg_get(config, "usuario", settings.api_user)
+    password = _cfg_get(config, "senha", settings.api_pass)
+
+    if not login_url:
         raise ValueError("API_LOGIN_URL nao configurada no .env")
-    if not settings.api_user or not settings.api_pass:
+    if not user or not password:
         raise ValueError("API_USER/API_PASS nao configurados no .env")
 
     payload = {
-        "user": settings.api_user,
-        "pass": settings.api_pass,
+        "user": user,
+        "pass": password,
     }
     headers = {
         "accept": "application/json",
@@ -21,7 +31,7 @@ def login_api(timeout: float = 30.0) -> Dict[str, Any]:
     }
 
     with httpx.Client(timeout=timeout) as client:
-        response = client.post(settings.api_login_url, json=payload, headers=headers)
+        response = client.post(login_url, json=payload, headers=headers)
         response.raise_for_status()
         data = response.json()
 

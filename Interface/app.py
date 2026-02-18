@@ -3,17 +3,25 @@ import re
 import subprocess
 import threading
 import time
+import uuid
 import tkinter as tk
 from datetime import datetime
 from tkinter import ttk
 from tkinter.scrolledtext import ScrolledText
 from typing import Any
+try:
+    import customtkinter as ctk
+    HAS_CUSTOMTKINTER = True
+except Exception:
+    ctk = None
+    HAS_CUSTOMTKINTER = False
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
 
 from Cadastro_API.login import login_api
 from config.engine import ativar_engine
+from config.integration_registry import IntegracaoClienteApi, IntegracaoEndpoint, IntegracaoRegistry
 from config.settings import settings
 from src.integradora.afastamento_sync_service import AfastamentoSyncService
 from src.integradora.api_dispatch_service import ApiDispatchService
@@ -21,12 +29,17 @@ from src.integradora.motorista_sync_service import MotoristaSyncService
 
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+BaseWindow = ctk.CTk if HAS_CUSTOMTKINTER else tk.Tk
 
 
-class IntegracaoApp(tk.Tk):
+class IntegracaoApp(BaseWindow):
     def __init__(self) -> None:
         super().__init__()
-        self.title("Integracao ATS")
+        if HAS_CUSTOMTKINTER:
+            ctk.set_appearance_mode("light")
+            ctk.set_default_color_theme("blue")
+        self.option_add("*Font", "{Segoe UI} 10")
+        self.title("Integrador de APIs")
         self.geometry("1280x820")
         self.minsize(1080, 700)
         self.protocol("WM_DELETE_WINDOW", self._ao_fechar)
@@ -45,6 +58,16 @@ class IntegracaoApp(tk.Tk):
         self._cache_colunas: dict[str, dict[str, str]] = {}
         self._monitor_job: str | None = None
         self._closing = False
+        self._busy_sync = 0
+        self._busy_api = 0
+        self._busy_lock = threading.Lock()
+        self._progress_job: str | None = None
+        self._progress_active = False
+        self.registry = IntegracaoRegistry()
+        self.integracao_items: list[IntegracaoClienteApi] = []
+        self.integracao_selected_id: str | None = None
+        self.endpoint_selected_id: str | None = None
+        self.current_endpoints: list[IntegracaoEndpoint] = []
 
         self.origens_opcoes = self._unique([settings.source_database_dev, settings.source_database_prod])
         self.destinos_opcoes = self._unique([settings.target_database])
@@ -94,6 +117,10 @@ class IntegracaoApp(tk.Tk):
         self.win_service_api_afastamentos_var = tk.StringVar(value=api_a)
 
         self.status_var = tk.StringVar(value="Status: pronto")
+        self.progress_text_var = tk.StringVar(value="Progresso: ocioso")
+        self.progress_value_var = tk.DoubleVar(value=0.0)
+        self.sync_exec_status_var = tk.StringVar(value="SYNC: ocioso")
+        self.api_exec_status_var = tk.StringVar(value="API: ocioso")
         self.servicos_status_var = tk.StringVar(value="Servicos locais: motoristas=OFF afastamentos=OFF")
         self.windows_services_status_var = tk.StringVar(value="Windows Sync: motoristas=? afastamentos=?")
         self.windows_api_services_status_var = tk.StringVar(value="Windows API: motoristas=? afastamentos=?")
@@ -105,17 +132,72 @@ class IntegracaoApp(tk.Tk):
         self.lista_status_var = tk.StringVar(value="Todos")
         self.lista_limite_var = tk.StringVar(value="100")
         self.lista_eventos_cache: list[dict[str, Any]] = []
+        self.cliente_api_ativo_var = tk.StringVar(value="Cliente API ativo: padrao (.env)")
 
+        self.int_nome_var = tk.StringVar(value="")
+        self.int_fornecedor_var = tk.StringVar(value="ATS_Log")
+        self.int_login_url_var = tk.StringVar(value="")
+        self.int_base_url_var = tk.StringVar(value="")
+        self.int_usuario_var = tk.StringVar(value="")
+        self.int_senha_var = tk.StringVar(value="")
+        self.int_endpoint_tipo_var = tk.StringVar(value="")
+        self.int_endpoint_path_var = tk.StringVar(value="")
+        self.int_endpoint_tabela_var = tk.StringVar(value="")
+        self.int_endpoint_ativo_var = tk.BooleanVar(value=True)
+        self.int_timeout_var = tk.StringVar(value=str(settings.api_timeout_seconds))
+
+        self._setup_styles()
         self._build_ui()
+        self._carregar_configs_integracao(log_line=False)
         self.after(300, lambda: self._run_async(self._atualizacao_inicial, channel="api"))
         self.after(1000, self._agendar_monitoramento_periodico)
 
+    def _setup_styles(self) -> None:
+        style = ttk.Style(self)
+        for theme in ("vista", "xpnative", "clam", "default"):
+            if theme in style.theme_names():
+                style.theme_use(theme)
+                break
+
+        self.configure(background="#f3f5f7")
+        style.configure("TFrame", background="#f3f5f7")
+        style.configure("TLabel", foreground="#1f2937")
+        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"), foreground="#0f172a")
+        style.configure("SubTitle.TLabel", font=("Segoe UI", 10), foreground="#475569")
+        style.configure("TLabelframe", background="#ffffff", borderwidth=1, relief="solid")
+        style.configure("TLabelframe.Label", font=("Segoe UI", 10, "bold"), foreground="#0f172a")
+        style.configure("TButton", padding=(10, 6))
+        style.configure("Primary.TButton", foreground="#ffffff")
+        style.map("Primary.TButton", background=[("!disabled", "#0d6efd"), ("pressed", "#0b5ed7")])
+        style.configure("TNotebook", background="#f3f5f7")
+        style.configure("TNotebook.Tab", padding=(14, 8), font=("Segoe UI", 10, "bold"))
+        style.configure("Treeview", rowheight=24, font=("Consolas", 10))
+        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
+        style.configure("StatusIdle.TLabel", foreground="#1b5e20")
+        style.configure("StatusBusy.TLabel", foreground="#e65100")
+
     def _build_ui(self) -> None:
         self.columnconfigure(0, weight=1)
-        self.rowconfigure(1, weight=1)
+        self.rowconfigure(2, weight=1)
+
+        header = ttk.Frame(self, padding=(12, 12, 12, 6))
+        header.grid(row=0, column=0, sticky="ew")
+        header.columnconfigure(0, weight=1)
+        ttk.Label(header, text="Integrador Multi-Cliente de APIs", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            header,
+            text="Cadastre clientes, autenticação e endpoints para executar sincronização e envio com segurança.",
+            style="SubTitle.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+        if not HAS_CUSTOMTKINTER:
+            ttk.Label(
+                header,
+                text="Modo visual padrão ativo (instale customtkinter para UI avançada).",
+                style="SubTitle.TLabel",
+            ).grid(row=2, column=0, sticky="w", pady=(2, 0))
 
         top = ttk.Frame(self, padding=12)
-        top.grid(row=0, column=0, sticky="ew")
+        top.grid(row=1, column=0, sticky="ew")
         top.columnconfigure(99, weight=1)
 
         ttk.Label(top, text="Ambiente:").grid(row=0, column=0, sticky="w")
@@ -155,7 +237,7 @@ class IntegracaoApp(tk.Tk):
             width=6,
         ).grid(row=0, column=8, padx=(6, 14), sticky="w")
 
-        ttk.Button(top, text="Login API", command=lambda: self._run_async(self._login, channel="api")).grid(
+        ttk.Button(top, text="Login API", style="Primary.TButton", command=lambda: self._run_async(self._login, channel="api")).grid(
             row=0,
             column=9,
             padx=(0, 8),
@@ -165,23 +247,44 @@ class IntegracaoApp(tk.Tk):
             column=10,
             padx=(0, 8),
         )
+        self.sync_status_label = ttk.Label(top, textvariable=self.sync_exec_status_var, style="StatusIdle.TLabel")
+        self.sync_status_label.grid(row=0, column=11, padx=(6, 8), sticky="w")
+        self.api_status_label = ttk.Label(top, textvariable=self.api_exec_status_var, style="StatusIdle.TLabel")
+        self.api_status_label.grid(row=0, column=12, padx=(0, 8), sticky="w")
+        ttk.Label(top, textvariable=self.cliente_api_ativo_var).grid(row=0, column=13, padx=(10, 0), sticky="w")
 
         self.notebook = ttk.Notebook(self)
-        self.notebook.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 8))
+        self.notebook.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 8))
 
         self.tab_sync = ttk.Frame(self.notebook, padding=10)
         self.tab_api = ttk.Frame(self.notebook, padding=10)
         self.tab_lista = ttk.Frame(self.notebook, padding=10)
+        self.tab_clientes = ttk.Frame(self.notebook, padding=10)
 
         self.notebook.add(self.tab_sync, text="Sincronizacao")
         self.notebook.add(self.tab_api, text="Monitor API")
         self.notebook.add(self.tab_lista, text="Lista Integracao")
+        self.notebook.add(self.tab_clientes, text="Clientes/API (Auth + Endpoints)")
 
         self._build_tab_sync()
         self._build_tab_api()
         self._build_tab_lista()
+        self._build_tab_clientes()
 
-        ttk.Label(self, textvariable=self.status_var, padding=(12, 0, 12, 10)).grid(row=2, column=0, sticky="w")
+        ttk.Label(self, textvariable=self.status_var, padding=(12, 0, 12, 4)).grid(row=3, column=0, sticky="w")
+
+        progresso = ttk.Frame(self, padding=(12, 0, 12, 10))
+        progresso.grid(row=4, column=0, sticky="ew")
+        progresso.columnconfigure(1, weight=1)
+        ttk.Label(progresso, textvariable=self.progress_text_var).grid(row=0, column=0, sticky="w", padx=(0, 10))
+        self.progress_bar = ttk.Progressbar(
+            progresso,
+            orient="horizontal",
+            mode="determinate",
+            variable=self.progress_value_var,
+            maximum=100.0,
+        )
+        self.progress_bar.grid(row=0, column=1, sticky="ew")
     def _build_tab_sync(self) -> None:
         self.tab_sync.columnconfigure(0, weight=1)
         self.tab_sync.rowconfigure(3, weight=1)
@@ -543,29 +646,473 @@ class IntegracaoApp(tk.Tk):
         self.lista_detalhes_text = ScrolledText(detalhes, wrap=tk.WORD, font=("Consolas", 10), height=9)
         self.lista_detalhes_text.grid(row=0, column=0, sticky="nsew")
 
+    def _build_tab_clientes(self) -> None:
+        self.tab_clientes.columnconfigure(0, weight=1)
+        self.tab_clientes.rowconfigure(1, weight=1)
+
+        acoes = ttk.Frame(self.tab_clientes)
+        acoes.grid(row=0, column=0, sticky="ew", pady=(0, 8))
+        acoes.columnconfigure(99, weight=1)
+        ttk.Button(acoes, text="Novo cadastro", command=self._novo_config_integracao).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(acoes, text="Abrir cadastro", command=self._abrir_config_integracao_selecionada).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(acoes, text="Definir ativo", command=self._definir_config_ativa).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(acoes, text="Remover", command=self._remover_config_integracao).grid(row=0, column=3, padx=(0, 6))
+        ttk.Button(acoes, text="Recarregar", command=self._recarregar_configs_integracao).grid(row=0, column=4, padx=(0, 6))
+        ttk.Label(
+            acoes,
+            text="Dica: clique duas vezes em um cliente para abrir detalhes, endpoints e testar login.",
+            style="SubTitle.TLabel",
+        ).grid(row=0, column=99, sticky="e")
+
+        lista = ttk.LabelFrame(self.tab_clientes, text="Clientes/API cadastrados", padding=10)
+        lista.grid(row=1, column=0, sticky="nsew")
+        lista.columnconfigure(0, weight=1)
+        lista.rowconfigure(0, weight=1)
+
+        cols = ("nome", "fornecedor", "ativo", "login_url", "base_url", "usuario", "endpoint_m", "endpoint_a", "timeout")
+        self.integracao_tree = ttk.Treeview(lista, columns=cols, show="headings", height=20)
+        self.integracao_tree.grid(row=0, column=0, sticky="nsew")
+        self.integracao_tree.bind("<<TreeviewSelect>>", self._on_integracao_item_select)
+        self.integracao_tree.bind("<Double-1>", self._abrir_config_integracao_selecionada)
+
+        scrollbar = ttk.Scrollbar(lista, orient="vertical", command=self.integracao_tree.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns")
+        self.integracao_tree.configure(yscrollcommand=scrollbar.set)
+
+        headers = {
+            "nome": "Cliente",
+            "fornecedor": "Fornecedor",
+            "ativo": "Ativo",
+            "login_url": "Login URL",
+            "base_url": "Base URL",
+            "usuario": "Usuario",
+            "endpoint_m": "Qtd Endpoints",
+            "endpoint_a": "Tipos",
+            "timeout": "Timeout",
+        }
+        widths = {
+            "nome": 180,
+            "fornecedor": 110,
+            "ativo": 60,
+            "login_url": 220,
+            "base_url": 220,
+            "usuario": 130,
+            "endpoint_m": 130,
+            "endpoint_a": 130,
+            "timeout": 70,
+        }
+        for col in cols:
+            self.integracao_tree.heading(col, text=headers[col])
+            self.integracao_tree.column(col, width=widths[col], anchor="w")
+
+    def _recarregar_configs_integracao(self) -> None:
+        self._carregar_configs_integracao(log_line=True)
+
+    def _novo_config_integracao(self) -> None:
+        self.integracao_selected_id = None
+        self._abrir_dialog_integracao(None)
+
+    def _on_integracao_item_select(self, _event=None) -> None:
+        selected = self.integracao_tree.selection()
+        if not selected:
+            return
+        iid = selected[0]
+        item = next((x for x in self.integracao_items if x.id == iid), None)
+        if item is None:
+            return
+
+        self.integracao_selected_id = item.id
+
+    def _abrir_config_integracao_selecionada(self, _event=None) -> None:
+        if not self.integracao_selected_id:
+            selected = self.integracao_tree.selection()
+            if not selected:
+                self._set_status("Status: selecione um cliente/API para abrir")
+                return
+            self.integracao_selected_id = selected[0]
+
+        item = next((x for x in self.integracao_items if x.id == self.integracao_selected_id), None)
+        if item is None:
+            self._set_status("Status: cliente/API selecionado nao encontrado")
+            return
+        self._abrir_dialog_integracao(item)
+
+    def _abrir_dialog_integracao(self, item: IntegracaoClienteApi | None) -> None:
+        self.endpoint_selected_id = None
+        self.current_endpoints = list((item.endpoints if item else []) or [])
+        self.int_nome_var.set(item.nome if item else "")
+        self.int_fornecedor_var.set(item.fornecedor if item else "ATS_Log")
+        self.int_login_url_var.set(item.login_url if item else "")
+        self.int_base_url_var.set(item.base_url if item else "")
+        self.int_usuario_var.set(item.usuario if item else "")
+        self.int_senha_var.set(item.senha if item else "")
+        self.int_timeout_var.set(str((item.timeout_seconds if item else settings.api_timeout_seconds)))
+        self._limpar_endpoint_form()
+        self.integracao_selected_id = item.id if item else None
+
+        dialog = tk.Toplevel(self)
+        dialog.title("Cadastro de Integracao API" if item is None else f"Detalhes da Integracao: {item.nome}")
+        dialog.geometry("980x720")
+        dialog.minsize(880, 640)
+        dialog.transient(self)
+        dialog.grab_set()
+        dialog.columnconfigure(0, weight=1)
+        dialog.rowconfigure(1, weight=1)
+        dialog.protocol("WM_DELETE_WINDOW", lambda: self._fechar_dialog_integracao(dialog))
+
+        topo = ttk.Frame(dialog, padding=(12, 12, 12, 6))
+        topo.grid(row=0, column=0, sticky="ew")
+        topo.columnconfigure(0, weight=1)
+        ttk.Label(topo, text="Configuracao da Integracao", style="Title.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(
+            topo,
+            text="Preencha autenticacao e endpoints; use 'Testar login' antes de salvar.",
+            style="SubTitle.TLabel",
+        ).grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        corpo = ttk.Frame(dialog, padding=(12, 0, 12, 8))
+        corpo.grid(row=1, column=0, sticky="nsew")
+        corpo.columnconfigure(0, weight=1)
+        corpo.rowconfigure(2, weight=1)
+
+        bloco_cliente = ttk.LabelFrame(corpo, text="Identificacao do Cliente", padding=10)
+        bloco_cliente.grid(row=0, column=0, sticky="ew")
+        bloco_cliente.columnconfigure(1, weight=1)
+        ttk.Label(bloco_cliente, text="Nome cliente:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(bloco_cliente, textvariable=self.int_nome_var).grid(row=0, column=1, sticky="ew", padx=(8, 10))
+        ttk.Label(bloco_cliente, text="Fornecedor:").grid(row=0, column=2, sticky="w")
+        ttk.Entry(bloco_cliente, textvariable=self.int_fornecedor_var, width=24).grid(row=0, column=3, sticky="w")
+
+        bloco_auth = ttk.LabelFrame(corpo, text="Autenticacao da API", padding=10)
+        bloco_auth.grid(row=1, column=0, sticky="ew", pady=(8, 8))
+        bloco_auth.columnconfigure(1, weight=1)
+        ttk.Label(bloco_auth, text="Login URL:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(bloco_auth, textvariable=self.int_login_url_var).grid(row=0, column=1, sticky="ew", padx=(8, 10))
+        ttk.Label(bloco_auth, text="Base URL:").grid(row=1, column=0, sticky="w")
+        ttk.Entry(bloco_auth, textvariable=self.int_base_url_var).grid(row=1, column=1, sticky="ew", padx=(8, 10), pady=(6, 0))
+        ttk.Label(bloco_auth, text="Usuario:").grid(row=0, column=2, sticky="w")
+        ttk.Entry(bloco_auth, textvariable=self.int_usuario_var, width=24).grid(row=0, column=3, sticky="w")
+        ttk.Label(bloco_auth, text="Senha:").grid(row=1, column=2, sticky="w", pady=(6, 0))
+        ttk.Entry(bloco_auth, textvariable=self.int_senha_var, width=24, show="*").grid(row=1, column=3, sticky="w", pady=(6, 0))
+        ttk.Label(bloco_auth, text="Timeout (s):").grid(row=0, column=4, sticky="w", padx=(10, 0))
+        ttk.Entry(bloco_auth, textvariable=self.int_timeout_var, width=8).grid(row=0, column=5, sticky="w")
+
+        bloco_endpoint = ttk.LabelFrame(corpo, text="Endpoints da API", padding=10)
+        bloco_endpoint.grid(row=2, column=0, sticky="nsew")
+        bloco_endpoint.columnconfigure(0, weight=1)
+        bloco_endpoint.rowconfigure(2, weight=1)
+
+        form_ep = ttk.Frame(bloco_endpoint)
+        form_ep.grid(row=0, column=0, sticky="ew")
+        form_ep.columnconfigure(1, weight=1)
+        ttk.Label(form_ep, text="Tipo endpoint:").grid(row=0, column=0, sticky="w")
+        ttk.Entry(form_ep, textvariable=self.int_endpoint_tipo_var).grid(row=0, column=1, sticky="ew", padx=(8, 8))
+        ttk.Label(form_ep, text="Path endpoint:").grid(row=0, column=2, sticky="w")
+        ttk.Entry(form_ep, textvariable=self.int_endpoint_path_var, width=34).grid(row=0, column=3, sticky="ew", padx=(8, 8))
+        ttk.Label(form_ep, text="Tabela destino:").grid(row=1, column=0, sticky="w", pady=(6, 0))
+        ttk.Entry(form_ep, textvariable=self.int_endpoint_tabela_var).grid(row=1, column=1, sticky="ew", padx=(8, 8), pady=(6, 0))
+        ttk.Checkbutton(form_ep, text="Ativo", variable=self.int_endpoint_ativo_var).grid(row=1, column=2, sticky="w", pady=(6, 0))
+
+        botoes_ep = ttk.Frame(bloco_endpoint)
+        botoes_ep.grid(row=1, column=0, sticky="ew", pady=(8, 8))
+        ttk.Button(botoes_ep, text="Adicionar/Atualizar endpoint", command=self._upsert_endpoint_form).grid(row=0, column=0, padx=(0, 6))
+        ttk.Button(botoes_ep, text="Remover endpoint", command=self._remover_endpoint_form).grid(row=0, column=1, padx=(0, 6))
+        ttk.Button(botoes_ep, text="Limpar endpoint", command=self._limpar_endpoint_form).grid(row=0, column=2, padx=(0, 6))
+
+        ep_cols = ("tipo", "endpoint", "tabela", "ativo")
+        self.endpoint_tree = ttk.Treeview(bloco_endpoint, columns=ep_cols, show="headings", height=10)
+        self.endpoint_tree.grid(row=2, column=0, sticky="nsew")
+        self.endpoint_tree.bind("<<TreeviewSelect>>", self._on_endpoint_item_select)
+        self.endpoint_tree.bind("<Double-1>", self._on_endpoint_item_select)
+        for col, title, width in (
+            ("tipo", "Tipo", 150),
+            ("endpoint", "Endpoint", 370),
+            ("tabela", "Tabela", 190),
+            ("ativo", "Ativo", 70),
+        ):
+            self.endpoint_tree.heading(col, text=title)
+            self.endpoint_tree.column(col, width=width, anchor="w")
+        self._render_endpoint_tree()
+
+        rodape = ttk.Frame(dialog, padding=(12, 0, 12, 12))
+        rodape.grid(row=2, column=0, sticky="ew")
+        ttk.Button(rodape, text="Testar login", command=lambda: self._run_async(self._testar_login_config, channel="api")).grid(
+            row=0, column=0, padx=(0, 6)
+        )
+        ttk.Button(rodape, text="Salvar", style="Primary.TButton", command=lambda: self._salvar_integracao_dialog(dialog)).grid(
+            row=0, column=1, padx=(0, 6)
+        )
+        ttk.Button(rodape, text="Definir ativo", command=self._definir_config_ativa).grid(row=0, column=2, padx=(0, 6))
+        ttk.Button(rodape, text="Fechar", command=lambda: self._fechar_dialog_integracao(dialog)).grid(row=0, column=3)
+
+    def _salvar_integracao_dialog(self, dialog: tk.Toplevel) -> None:
+        try:
+            self._salvar_config_integracao()
+            self._carregar_configs_integracao(log_line=False)
+            self._fechar_dialog_integracao(dialog)
+        except Exception as exc:
+            self._set_status(f"Status: erro ao salvar integracao - {exc}")
+            self._log_api(str(exc), level="ERROR")
+
+    def _fechar_dialog_integracao(self, dialog: tk.Toplevel) -> None:
+        try:
+            dialog.destroy()
+        finally:
+            if hasattr(self, "endpoint_tree"):
+                try:
+                    delattr(self, "endpoint_tree")
+                except Exception:
+                    pass
+
+    def _config_from_form(self) -> IntegracaoClienteApi:
+        nome = (self.int_nome_var.get() or "").strip()
+        if not nome:
+            raise ValueError("Informe o nome do cliente.")
+        login_url = (self.int_login_url_var.get() or "").strip()
+        if not login_url:
+            raise ValueError("Informe o Login URL.")
+        usuario = (self.int_usuario_var.get() or "").strip()
+        senha = (self.int_senha_var.get() or "").strip()
+        if not usuario or not senha:
+            raise ValueError("Informe usuario e senha da API.")
+
+        try:
+            timeout_seconds = float((self.int_timeout_var.get() or "").strip() or settings.api_timeout_seconds)
+        except Exception as exc:
+            raise ValueError("Timeout invalido.") from exc
+        if not self.current_endpoints:
+            raise ValueError("Cadastre ao menos um endpoint para a integracao.")
+
+        return IntegracaoClienteApi(
+            id=str(self.integracao_selected_id or "").strip(),
+            nome=nome,
+            fornecedor=(self.int_fornecedor_var.get() or "ATS_Log").strip() or "ATS_Log",
+            base_url=(self.int_base_url_var.get() or "").strip(),
+            login_url=login_url,
+            usuario=usuario,
+            senha=senha,
+            timeout_seconds=max(1.0, timeout_seconds),
+            endpoints=list(self.current_endpoints),
+        )
+
+    def _salvar_config_integracao(self) -> None:
+        cfg = self._config_from_form()
+        saved = self.registry.upsert(cfg)
+        self.integracao_selected_id = saved.id
+        self._carregar_configs_integracao(log_line=True)
+        self._log_api(f"Cliente/API salvo: {saved.nome}")
+
+    def _remover_config_integracao(self) -> None:
+        if not self.integracao_selected_id:
+            self._set_status("Status: selecione um cliente/API para remover")
+            return
+        self.registry.delete(self.integracao_selected_id)
+        self.integracao_selected_id = None
+        self.current_endpoints = []
+        self.endpoint_selected_id = None
+        self._limpar_endpoint_form()
+        self._carregar_configs_integracao(log_line=True)
+        self._log_api("Cliente/API removido.")
+
+    def _definir_config_ativa(self) -> None:
+        if not self.integracao_selected_id:
+            self._set_status("Status: selecione um cliente/API para ativar")
+            return
+        self.registry.set_active(self.integracao_selected_id)
+        self._carregar_configs_integracao(log_line=True)
+        self._log_api("Cliente/API ativo atualizado.")
+
+    def _testar_login_config(self) -> None:
+        nome = (self.int_nome_var.get() or "").strip() or "Sem nome"
+        login_url = (self.int_login_url_var.get() or "").strip()
+        usuario = (self.int_usuario_var.get() or "").strip()
+        senha = (self.int_senha_var.get() or "").strip()
+        if not login_url or not usuario or not senha:
+            raise ValueError("Informe Login URL, usuario e senha para testar autenticacao.")
+        timeout_seconds = float((self.int_timeout_var.get() or "").strip() or settings.api_timeout_seconds)
+        cfg = IntegracaoClienteApi(
+            id=str(self.integracao_selected_id or "").strip(),
+            nome=nome,
+            fornecedor=(self.int_fornecedor_var.get() or "ATS_Log").strip() or "ATS_Log",
+            base_url=(self.int_base_url_var.get() or "").strip(),
+            login_url=login_url,
+            usuario=usuario,
+            senha=senha,
+            timeout_seconds=max(1.0, timeout_seconds),
+            endpoints=[],
+        )
+        self._set_status(f"Status: testando login ({cfg.nome})...")
+        auth = login_api(timeout=cfg.timeout_seconds, config=cfg.to_runtime_dict())
+        exp = auth.get("exp")
+        self._set_status("Status: login testado com sucesso")
+        self._log_api(f"Login ok para cliente '{cfg.nome}'. Expira em: {exp}")
+
+    def _limpar_endpoint_form(self) -> None:
+        self.endpoint_selected_id = None
+        self.int_endpoint_tipo_var.set("")
+        self.int_endpoint_path_var.set("")
+        self.int_endpoint_tabela_var.set("")
+        self.int_endpoint_ativo_var.set(True)
+
+    def _upsert_endpoint_form(self) -> None:
+        tipo = (self.int_endpoint_tipo_var.get() or "").strip()
+        endpoint = (self.int_endpoint_path_var.get() or "").strip()
+        tabela = (self.int_endpoint_tabela_var.get() or "").strip()
+        if not tipo:
+            raise ValueError("Informe o tipo do endpoint.")
+        if not endpoint:
+            raise ValueError("Informe o path do endpoint.")
+
+        ep_id = str(self.endpoint_selected_id or "").strip()
+        novo = IntegracaoEndpoint(
+            id=ep_id or str(uuid.uuid4()),
+            tipo=tipo,
+            endpoint=endpoint,
+            tabela_destino=tabela,
+            ativo=bool(self.int_endpoint_ativo_var.get()),
+        )
+
+        atualizado = False
+        for idx, existing in enumerate(self.current_endpoints):
+            if existing.id == novo.id:
+                self.current_endpoints[idx] = novo
+                atualizado = True
+                break
+        if not atualizado:
+            self.current_endpoints.append(novo)
+
+        self._render_endpoint_tree()
+        self._limpar_endpoint_form()
+
+    def _remover_endpoint_form(self) -> None:
+        if not self.endpoint_selected_id:
+            raise ValueError("Selecione um endpoint para remover.")
+        self.current_endpoints = [ep for ep in self.current_endpoints if ep.id != self.endpoint_selected_id]
+        self._render_endpoint_tree()
+        self._limpar_endpoint_form()
+
+    def _on_endpoint_item_select(self, _event=None) -> None:
+        if not hasattr(self, "endpoint_tree") or not self.endpoint_tree.winfo_exists():
+            return
+        selected = self.endpoint_tree.selection()
+        if not selected:
+            return
+        ep_id = selected[0]
+        ep = next((x for x in self.current_endpoints if x.id == ep_id), None)
+        if ep is None:
+            return
+        self.endpoint_selected_id = ep.id
+        self.int_endpoint_tipo_var.set(ep.tipo)
+        self.int_endpoint_path_var.set(ep.endpoint)
+        self.int_endpoint_tabela_var.set(ep.tabela_destino)
+        self.int_endpoint_ativo_var.set(ep.ativo)
+
+    def _render_endpoint_tree(self) -> None:
+        if not hasattr(self, "endpoint_tree") or not self.endpoint_tree.winfo_exists():
+            return
+        self.endpoint_tree.delete(*self.endpoint_tree.get_children())
+        for ep in self.current_endpoints:
+            self.endpoint_tree.insert(
+                "",
+                tk.END,
+                iid=ep.id,
+                values=(ep.tipo, ep.endpoint, ep.tabela_destino, "Sim" if ep.ativo else "Nao"),
+            )
+
+    def _carregar_configs_integracao(self, *, log_line: bool = False) -> None:
+        self.integracao_items = self.registry.list_configs()
+        active_id = self.registry.get_active_id()
+        active = self.registry.get_active()
+        label_ativo = f"Cliente API ativo: {active.nome}" if active else "Cliente API ativo: padrao (.env)"
+        self.cliente_api_ativo_var.set(label_ativo)
+
+        if not self.integracao_items and not self.integracao_selected_id:
+            default_cfg = self.registry.default_config()
+            self.int_nome_var.set(default_cfg.nome)
+            self.int_fornecedor_var.set(default_cfg.fornecedor)
+            self.int_login_url_var.set(default_cfg.login_url)
+            self.int_base_url_var.set(default_cfg.base_url)
+            self.int_usuario_var.set(default_cfg.usuario)
+            self.int_senha_var.set(default_cfg.senha)
+            self.current_endpoints = list(default_cfg.endpoints or [])
+            self._render_endpoint_tree()
+            self.int_timeout_var.set(str(default_cfg.timeout_seconds))
+
+        if hasattr(self, "integracao_tree"):
+            self.integracao_tree.delete(*self.integracao_tree.get_children())
+            for item in self.integracao_items:
+                ativo = "Sim" if item.id == active_id else "Nao"
+                tipos = ", ".join(sorted({(ep.tipo or "").strip() for ep in item.endpoints if (ep.tipo or "").strip()}))
+                self.integracao_tree.insert(
+                    "",
+                    tk.END,
+                    iid=item.id,
+                    values=(
+                        item.nome,
+                        item.fornecedor,
+                        ativo,
+                        item.login_url,
+                        item.base_url,
+                        item.usuario,
+                        len(item.endpoints),
+                        tipos,
+                        item.timeout_seconds,
+                    ),
+                )
+
+            if self.integracao_selected_id and self.integracao_tree.exists(self.integracao_selected_id):
+                self.integracao_tree.selection_set(self.integracao_selected_id)
+                self.integracao_tree.focus(self.integracao_selected_id)
+                self._on_integracao_item_select()
+            elif active_id and self.integracao_tree.exists(active_id):
+                self.integracao_tree.selection_set(active_id)
+                self.integracao_tree.focus(active_id)
+                self._on_integracao_item_select()
+
+        if log_line:
+            self._log_api(f"Clientes/API carregados: {len(self.integracao_items)}. Ativo: {active.nome if active else 'padrao (.env)'}")
+
+    def _config_api_ativa(self) -> dict[str, Any] | None:
+        active = self.registry.get_active()
+        return active.to_runtime_dict() if active else None
+
     def _run_async(self, target, *, channel: str = "sync") -> None:
+        with self._busy_lock:
+            channel_busy = self._busy_api if channel == "api" else self._busy_sync
+        if channel_busy > 0:
+            if channel == "api":
+                self._log_api("Acao ignorada: ja existe uma operacao API em andamento.", level="WARN")
+            else:
+                self._log_sync("Acao ignorada: ja existe uma operacao de sincronizacao em andamento.", level="WARN")
+            return
         thread = threading.Thread(target=self._safe_call, args=(target, channel), daemon=True)
         thread.start()
 
     def _safe_call(self, target, channel: str) -> None:
+        self._set_busy(channel, True)
         try:
             target()
         except Exception as exc:
             self._set_status(f"Status: erro - {exc}")
             if channel == "api":
-                self._log_api(f"ERRO: {exc}")
+                self._log_api(f"{exc}", level="ERROR")
             else:
-                self._log_sync(f"ERRO: {exc}")
+                self._log_sync(f"{exc}", level="ERROR")
+        finally:
+            self._set_busy(channel, False)
 
     def _clear_text(self, widget: ScrolledText) -> None:
         widget.delete("1.0", tk.END)
 
-    def _append_log(self, widget: ScrolledText, message: str) -> None:
+    def _append_log(self, widget: ScrolledText, message: str, *, level: str = "INFO") -> None:
         if self._closing:
             return
 
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        line = f"[{timestamp}] [{level}] {message}"
+
         def _append() -> None:
-            widget.insert(tk.END, f"{message}\n")
+            widget.insert(tk.END, f"{line}\n")
             widget.see(tk.END)
 
         try:
@@ -573,11 +1120,99 @@ class IntegracaoApp(tk.Tk):
         except tk.TclError:
             pass
 
-    def _log_sync(self, message: str) -> None:
-        self._append_log(self.output_text_sync, message)
+    def _log_sync(self, message: str, *, level: str = "INFO") -> None:
+        self._append_log(self.output_text_sync, message, level=level)
 
-    def _log_api(self, message: str) -> None:
-        self._append_log(self.output_text_api, message)
+    def _log_api(self, message: str, *, level: str = "INFO") -> None:
+        self._append_log(self.output_text_api, message, level=level)
+
+    def _set_busy(self, channel: str, busy: bool) -> None:
+        with self._busy_lock:
+            if channel == "api":
+                self._busy_api = max(0, self._busy_api + (1 if busy else -1))
+            else:
+                self._busy_sync = max(0, self._busy_sync + (1 if busy else -1))
+            is_busy = (self._busy_sync + self._busy_api) > 0
+
+        sync_text = "SYNC: executando" if self._busy_sync > 0 else "SYNC: ocioso"
+        api_text = "API: executando" if self._busy_api > 0 else "API: ocioso"
+        sync_style = "StatusBusy.TLabel" if self._busy_sync > 0 else "StatusIdle.TLabel"
+        api_style = "StatusBusy.TLabel" if self._busy_api > 0 else "StatusIdle.TLabel"
+        try:
+            self.after(0, lambda: self.sync_exec_status_var.set(sync_text))
+            self.after(0, lambda: self.api_exec_status_var.set(api_text))
+            self.after(0, lambda: self.sync_status_label.configure(style=sync_style))
+            self.after(0, lambda: self.api_status_label.configure(style=api_style))
+        except tk.TclError:
+            pass
+
+        self._apply_busy_ui(is_busy)
+        self._update_progress(is_busy)
+
+    def _apply_busy_ui(self, is_busy: bool) -> None:
+        if self._closing:
+            return
+
+        def _apply() -> None:
+            try:
+                self.configure(cursor="watch" if is_busy else "")
+            except Exception:
+                pass
+
+        try:
+            self.after(0, _apply)
+        except tk.TclError:
+            pass
+
+    def _update_progress(self, is_busy: bool) -> None:
+        if self._closing:
+            return
+        try:
+            self.after(0, lambda: self._update_progress_main_thread(is_busy))
+        except tk.TclError:
+            pass
+
+    def _update_progress_main_thread(self, is_busy: bool) -> None:
+        if self._closing:
+            return
+
+        if is_busy:
+            if not self._progress_active:
+                self._progress_active = True
+                self.progress_text_var.set("Progresso: executando...")
+                self.progress_value_var.set(8.0)
+                self._pulse_progress()
+            return
+
+        if not self._progress_active:
+            return
+
+        self._progress_active = False
+        if self._progress_job is not None:
+            try:
+                self.after_cancel(self._progress_job)
+            except Exception:
+                pass
+            self._progress_job = None
+
+        self.progress_value_var.set(100.0)
+        self.progress_text_var.set("Progresso: concluido")
+        self.after(500, self._reset_progress_idle)
+
+    def _pulse_progress(self) -> None:
+        if self._closing or not self._progress_active:
+            return
+
+        value = float(self.progress_value_var.get())
+        value = value + 4.0 if value < 92.0 else 18.0
+        self.progress_value_var.set(value)
+        self._progress_job = self.after(120, self._pulse_progress)
+
+    def _reset_progress_idle(self) -> None:
+        if self._closing or self._progress_active:
+            return
+        self.progress_value_var.set(0.0)
+        self.progress_text_var.set("Progresso: ocioso")
 
     def _set_status(self, text_value: str) -> None:
         if self._closing:
@@ -732,11 +1367,14 @@ class IntegracaoApp(tk.Tk):
 
     def _login(self) -> None:
         self._set_status("Status: autenticando API...")
-        auth = login_api()
+        cfg = self._config_api_ativa()
+        timeout_seconds = float((cfg or {}).get("timeout_seconds") or settings.api_timeout_seconds)
+        auth = login_api(timeout=timeout_seconds, config=cfg)
         self.token = auth.get("token")
         exp = auth.get("exp")
         self._set_status("Status: autenticado")
-        self._log_api(f"Login API ok. Expira em: {exp}")
+        nome_cliente = str((cfg or {}).get("nome") or "padrao (.env)")
+        self._log_api(f"Login API ok ({nome_cliente}). Expira em: {exp}")
 
     def _executar_motoristas(self) -> None:
         if self._motoristas_ativo():
@@ -815,54 +1453,138 @@ class IntegracaoApp(tk.Tk):
         self._executar_afastamentos()
 
     def _executar_api_motoristas(self) -> None:
-        self._executar_api(processar_motoristas=True, processar_afastamentos=False)
+        self._executar_api(tipos_permitidos={"motoristas", "motorista"})
 
     def _executar_api_afastamentos(self) -> None:
-        self._executar_api(processar_motoristas=False, processar_afastamentos=True)
+        self._executar_api(tipos_permitidos={"afastamentos", "afastamento"})
 
     def _executar_api_ambos(self) -> None:
-        self._executar_api(processar_motoristas=True, processar_afastamentos=True)
-    def _executar_api(self, *, processar_motoristas: bool, processar_afastamentos: bool) -> None:
+        self._executar_api(tipos_permitidos=set())
+
+    def _executar_api(self, *, tipos_permitidos: set[str]) -> None:
         self._set_status("Status: executando envio para API...")
         self._ensure_engine_destino()
+        cfg = self._config_api_ativa()
+        timeout_seconds = float((cfg or {}).get("timeout_seconds") or settings.api_timeout_seconds)
+        endpoints = self._listar_endpoints_ativos(cfg)
+        if tipos_permitidos:
+            endpoints = [ep for ep in endpoints if str(ep.get("tipo_normalizado") or "") in tipos_permitidos]
 
-        service = ApiDispatchService(
-            engine_destino=self.engine_destino,
-            schema_destino=settings.target_schema,
-            tabela_motorista=settings.target_motorista_table,
-            tabela_afastamento=settings.target_afastamento_table,
-            endpoint_motorista=settings.api_motorista_endpoint,
-            endpoint_afastamento=settings.api_afastamento_endpoint,
-            batch_size_motoristas=self._get_batch_api_motoristas(),
-            batch_size_afastamentos=self._get_batch_api_afastamentos(),
-            max_tentativas=settings.api_sync_max_tentativas,
-            lock_timeout_minutes=settings.api_sync_lock_timeout_minutes,
-            retry_base_seconds=settings.api_sync_retry_base_seconds,
-            retry_max_seconds=settings.api_sync_retry_max_seconds,
-            api_timeout_seconds=settings.api_timeout_seconds,
-            processar_motoristas=processar_motoristas,
-            processar_afastamentos=processar_afastamentos,
-        )
+        if not endpoints:
+            raise ValueError("Nenhum endpoint ativo compatível com o tipo selecionado.")
 
-        try:
-            resultado = service.executar_ciclo()
-        finally:
-            service.close()
+        total_ok_m = 0
+        total_ok_a = 0
+        total_err_m = 0
+        total_err_a = 0
+        endpoints_processados = 0
 
-        self._log_api(
-            "[API] Ciclo concluido: "
-            f"LockM={resultado.locks_liberados_motoristas} "
-            f"LockA={resultado.locks_liberados_afastamentos} "
-            f"CapM={resultado.motoristas_capturados} "
-            f"OkM={resultado.motoristas_sucesso} "
-            f"ErrM={resultado.motoristas_erro} "
-            f"CapA={resultado.afastamentos_capturados} "
-            f"OkA={resultado.afastamentos_sucesso} "
-            f"ErrA={resultado.afastamentos_erro}"
-        )
+        for ep in endpoints:
+            tipo_norm = str(ep.get("tipo_normalizado") or "")
+            processa_m = tipo_norm in {"motoristas", "motorista"}
+            processa_a = tipo_norm in {"afastamentos", "afastamento"}
+            if not processa_m and not processa_a:
+                self._log_api(
+                    f"[API] Endpoint ignorado por tipo sem mapeamento: tipo={ep.get('tipo')} path={ep.get('endpoint')}",
+                    level="WARN",
+                )
+                continue
+
+            tabela_custom = str(ep.get("tabela_destino") or "").strip()
+            tabela_motorista = tabela_custom if processa_m and tabela_custom else settings.target_motorista_table
+            tabela_afastamento = tabela_custom if processa_a and tabela_custom else settings.target_afastamento_table
+
+            service = ApiDispatchService(
+                engine_destino=self.engine_destino,
+                schema_destino=settings.target_schema,
+                tabela_motorista=tabela_motorista,
+                tabela_afastamento=tabela_afastamento,
+                endpoint_motorista=str(ep.get("endpoint") or settings.api_motorista_endpoint),
+                endpoint_afastamento=str(ep.get("endpoint") or settings.api_afastamento_endpoint),
+                batch_size_motoristas=self._get_batch_api_motoristas(),
+                batch_size_afastamentos=self._get_batch_api_afastamentos(),
+                max_tentativas=settings.api_sync_max_tentativas,
+                lock_timeout_minutes=settings.api_sync_lock_timeout_minutes,
+                retry_base_seconds=settings.api_sync_retry_base_seconds,
+                retry_max_seconds=settings.api_sync_retry_max_seconds,
+                api_timeout_seconds=timeout_seconds,
+                processar_motoristas=processa_m,
+                processar_afastamentos=processa_a,
+                integration_config=cfg,
+            )
+
+            try:
+                resultado = service.executar_ciclo()
+            finally:
+                service.close()
+
+            total_ok_m += int(resultado.motoristas_sucesso or 0)
+            total_ok_a += int(resultado.afastamentos_sucesso or 0)
+            total_err_m += int(resultado.motoristas_erro or 0)
+            total_err_a += int(resultado.afastamentos_erro or 0)
+            endpoints_processados += 1
+            self._log_api(
+                f"[API] Endpoint tipo={ep.get('tipo')} path={ep.get('endpoint')} "
+                f"OkM={resultado.motoristas_sucesso} ErrM={resultado.motoristas_erro} "
+                f"OkA={resultado.afastamentos_sucesso} ErrA={resultado.afastamentos_erro}"
+            )
+
+        if endpoints_processados == 0:
+            raise ValueError("Nenhum endpoint com tipo mapeado para envio (motoristas/afastamentos).")
+        self._log_api(f"[API] Consolidado: OkM={total_ok_m} ErrM={total_err_m} OkA={total_ok_a} ErrA={total_err_a}")
         self._set_status("Status: envio API finalizado")
         self._atualizar_monitor_api(log_line=False)
         self._atualizar_lista_integracao(log_line=False)
+
+    @staticmethod
+    def _normalizar_tipo_endpoint(value: str) -> str:
+        text = str(value or "").strip().lower()
+        if "afast" in text:
+            return "afastamentos"
+        if "motor" in text:
+            return "motoristas"
+        return text
+
+    def _listar_endpoints_ativos(self, cfg: dict[str, Any] | None) -> list[dict[str, Any]]:
+        runtime_cfg = cfg or {}
+        endpoints = runtime_cfg.get("endpoints") or []
+        result: list[dict[str, Any]] = []
+        for ep in endpoints:
+            if not isinstance(ep, dict):
+                continue
+            if not bool(ep.get("ativo", True)):
+                continue
+            endpoint_path = str(ep.get("endpoint") or "").strip()
+            tipo = str(ep.get("tipo") or "").strip()
+            if not endpoint_path or not tipo:
+                continue
+            result.append(
+                {
+                    "tipo": tipo,
+                    "tipo_normalizado": self._normalizar_tipo_endpoint(tipo),
+                    "endpoint": endpoint_path,
+                    "tabela_destino": str(ep.get("tabela_destino") or "").strip(),
+                }
+            )
+
+        if result:
+            return result
+
+        # Fallback para configuracao antiga/fixa
+        return [
+            {
+                "tipo": "motoristas",
+                "tipo_normalizado": "motoristas",
+                "endpoint": str(settings.api_motorista_endpoint),
+                "tabela_destino": str(settings.target_motorista_table),
+            },
+            {
+                "tipo": "afastamentos",
+                "tipo_normalizado": "afastamentos",
+                "endpoint": str(settings.api_afastamento_endpoint),
+                "tabela_destino": str(settings.target_afastamento_table),
+            },
+        ]
 
     def _motoristas_ativo(self) -> bool:
         return self.thread_servico_motoristas is not None and self.thread_servico_motoristas.is_alive()
@@ -1601,6 +2323,11 @@ class IntegracaoApp(tk.Tk):
         if self._monitor_job is not None:
             try:
                 self.after_cancel(self._monitor_job)
+            except Exception:
+                pass
+        if self._progress_job is not None:
+            try:
+                self.after_cancel(self._progress_job)
             except Exception:
                 pass
 

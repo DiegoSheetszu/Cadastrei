@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import urljoin, urlparse
 
 import httpx
@@ -18,9 +18,10 @@ class ApiResponse:
 
 
 class AtsApiClient:
-    def __init__(self, timeout_seconds: float = 30.0) -> None:
+    def __init__(self, timeout_seconds: float = 30.0, integration_config: Mapping[str, Any] | None = None) -> None:
+        self.integration_config = dict(integration_config or {})
         self.timeout_seconds = max(1.0, float(timeout_seconds))
-        self._base_url = self._resolver_base_url()
+        self._base_url = self._resolver_base_url(self.integration_config)
         self._token: str | None = None
         self._client = httpx.Client(timeout=self.timeout_seconds)
 
@@ -31,7 +32,7 @@ class AtsApiClient:
         if self._token and not force:
             return self._token
 
-        auth_data = login_api(timeout=self.timeout_seconds)
+        auth_data = login_api(timeout=self.timeout_seconds, config=self.integration_config)
         token = str(auth_data.get("token") or "").strip()
         if not token:
             raise ValueError("Resposta de login sem token valido.")
@@ -90,12 +91,12 @@ class AtsApiClient:
         return endpoint if endpoint.startswith("/") else f"/{endpoint}"
 
     @staticmethod
-    def _resolver_base_url() -> str:
-        base_url = str(settings.api_base_url or "").strip()
+    def _resolver_base_url(config: Mapping[str, Any] | None = None) -> str:
+        base_url = str((config or {}).get("base_url") or settings.api_base_url or "").strip()
         if base_url:
             return base_url.rstrip("/") + "/"
 
-        login_url = str(settings.api_login_url or "").strip()
+        login_url = str((config or {}).get("login_url") or settings.api_login_url or "").strip()
         if not login_url:
             raise ValueError("API_BASE_URL ou API_LOGIN_URL precisa estar configurado.")
 

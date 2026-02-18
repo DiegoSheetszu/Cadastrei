@@ -5,7 +5,7 @@ import time
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from sqlalchemy.engine import Engine
 
@@ -45,6 +45,7 @@ class ApiDispatchService:
         api_timeout_seconds: float = 30.0,
         processar_motoristas: bool = True,
         processar_afastamentos: bool = True,
+        integration_config: Mapping[str, Any] | None = None,
     ) -> None:
         self.processar_motoristas = bool(processar_motoristas)
         self.processar_afastamentos = bool(processar_afastamentos)
@@ -57,8 +58,16 @@ class ApiDispatchService:
         self.lock_timeout_minutes = max(1, int(lock_timeout_minutes))
         self.retry_base_seconds = max(1, int(retry_base_seconds))
         self.retry_max_seconds = max(self.retry_base_seconds, int(retry_max_seconds))
-        self.endpoint_motorista = endpoint_motorista or settings.api_motorista_endpoint
-        self.endpoint_afastamento = endpoint_afastamento or settings.api_afastamento_endpoint
+        self.integration_config = dict(integration_config or {})
+        self.endpoint_motorista = (
+            endpoint_motorista
+            or str(self.integration_config.get("endpoint_motorista") or settings.api_motorista_endpoint)
+        )
+        self.endpoint_afastamento = (
+            endpoint_afastamento
+            or str(self.integration_config.get("endpoint_afastamento") or settings.api_afastamento_endpoint)
+        )
+        timeout_api = float(self.integration_config.get("timeout_seconds") or api_timeout_seconds)
 
         self.repo = RepositorioFilaIntegracaoApi(
             engine_destino,
@@ -66,7 +75,7 @@ class ApiDispatchService:
             tabela_motorista=tabela_motorista,
             tabela_afastamento=tabela_afastamento,
         )
-        self.api_client = AtsApiClient(timeout_seconds=api_timeout_seconds)
+        self.api_client = AtsApiClient(timeout_seconds=timeout_api, integration_config=self.integration_config)
 
     def close(self) -> None:
         self.api_client.close()
