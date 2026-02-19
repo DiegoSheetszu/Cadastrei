@@ -17,11 +17,11 @@
       "id": "05814246-7d11-42aa-acda-220bf1453258",
       "nome": "ATS (Padrao .env)",
       "fornecedor": "ATS_Log",
-      "base_url": "https://servicedesk.atslog.com.br:8087",
-      "login_url": "https://servicedesk.atslog.com.br:8087/login",
-      "usuario": "atslog.teste",
-      "senha": "teste@123",
-      "timeout_seconds": 30.0,
+      "base_url": "http://hs101.scp.tec.br:7546",
+      "login_url": "http://hs101.scp.tec.br:7546/login",
+      "usuario": "wsintegerp",
+      "senha": "wsintegerp@@20",
+      "timeout_seconds": 1.0,
       "endpoints": [
         {
           "id": "6085378b-3944-4c1d-984b-75225316bf4c",
