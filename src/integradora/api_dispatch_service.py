@@ -182,6 +182,7 @@ class ApiDispatchService:
             else:
                 payload = self._enriquecer_payload_motorista(payload)
                 self._validar_payload_motorista(payload)
+            payload = self._enriquecer_payload_empregador(payload, evento=evento)
             response = self.api_client.post_json(self.endpoint_motorista, payload)
         except Exception as exc:
             return self._registrar_erro_motorista(
@@ -220,6 +221,7 @@ class ApiDispatchService:
                 payload = self._aplicar_de_para(payload_origem, contexto="afastamentos")
             else:
                 self._validar_payload_afastamento(payload)
+            payload = self._enriquecer_payload_empregador(payload, evento=evento)
             response = self.api_client.post_json(self.endpoint_afastamento, payload)
         except Exception as exc:
             return self._registrar_erro_afastamento(
@@ -346,6 +348,69 @@ class ApiDispatchService:
             motorista["sindicato"] = sindicato
 
         return motorista
+
+    def _enriquecer_payload_empregador(self, payload: dict[str, Any], *, evento: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(payload)
+
+        empregador_raw = enriched.get("empregador")
+        if isinstance(empregador_raw, dict):
+            empregador = dict(empregador_raw)
+        else:
+            empregador = {}
+
+        codigo = self._resolver_codigo_empregador(enriched, evento)
+        if codigo:
+            empregador.setdefault("codigo", codigo)
+
+        codigo_regra = str(settings.api_empregador_codigo or "").strip()
+        if codigo and codigo_regra and codigo == codigo_regra:
+            cnpj_padrao = str(settings.api_empregador_cnpj or "").strip()
+            nome_padrao = str(settings.api_empregador_nome or "").strip()
+            cidade_padrao = str(settings.api_empregador_cidade or "").strip()
+            uf_padrao = str(settings.api_empregador_uf or "").strip().upper()
+
+            if cnpj_padrao:
+                empregador.setdefault("cnpj", cnpj_padrao)
+            if nome_padrao:
+                empregador.setdefault("nome", nome_padrao)
+
+            endereco_raw = empregador.get("endereco")
+            if isinstance(endereco_raw, dict):
+                endereco = dict(endereco_raw)
+            else:
+                endereco = {}
+            if cidade_padrao:
+                endereco.setdefault("cidade", cidade_padrao)
+            if uf_padrao:
+                endereco.setdefault("uf", uf_padrao)
+            if endereco:
+                empregador["endereco"] = endereco
+
+        if empregador:
+            enriched["empregador"] = empregador
+
+        return enriched
+
+    @staticmethod
+    def _resolver_codigo_empregador(payload: dict[str, Any], evento: dict[str, Any]) -> str:
+        candidatos = [
+            payload.get("empregador", {}).get("codigo")
+            if isinstance(payload.get("empregador"), dict)
+            else None,
+            payload.get("numerodaempresa"),
+            payload.get("numempresa"),
+            payload.get("numemp"),
+            evento.get("numempresa"),
+            evento.get("numemp"),
+        ]
+
+        for candidato in candidatos:
+            if candidato is None:
+                continue
+            txt = str(candidato).strip()
+            if txt:
+                return txt
+        return ""
 
     @staticmethod
     def _validar_payload_afastamento(payload: dict[str, Any]) -> None:

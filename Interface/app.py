@@ -81,10 +81,18 @@ class IntegracaoApp(BaseWindow):
             [settings.win_service_afastamentos_dev, settings.win_service_afastamentos_prod]
         )
         self.win_service_api_motoristas_opcoes = self._unique(
-            [settings.win_service_api_motoristas_dev, settings.win_service_api_motoristas_prod]
+            [
+                settings.win_service_api_motoristas,
+                settings.win_service_api_motoristas_dev,
+                settings.win_service_api_motoristas_prod,
+            ]
         )
         self.win_service_api_afastamentos_opcoes = self._unique(
-            [settings.win_service_api_afastamentos_dev, settings.win_service_api_afastamentos_prod]
+            [
+                settings.win_service_api_afastamentos,
+                settings.win_service_api_afastamentos_dev,
+                settings.win_service_api_afastamentos_prod,
+            ]
         )
         self.endpoint_tipo_opcoes = ["motoristas", "afastamentos"]
         self.endpoint_tabela_opcoes = self._unique(
@@ -138,6 +146,8 @@ class IntegracaoApp(BaseWindow):
         self.lista_limite_var = tk.StringVar(value="100")
         self.lista_eventos_cache: list[dict[str, Any]] = []
         self.cliente_api_ativo_var = tk.StringVar(value="Cliente API ativo: padrao (.env)")
+        self.api_cliente_switch_var = tk.StringVar(value="")
+        self._api_cliente_opcoes: dict[str, str] = {}
 
         self.int_nome_var = tk.StringVar(value="")
         self.int_fornecedor_var = tk.StringVar(value="ATS_Log")
@@ -444,7 +454,7 @@ class IntegracaoApp(BaseWindow):
 
     def _build_tab_api(self) -> None:
         self.tab_api.columnconfigure(0, weight=1)
-        self.tab_api.rowconfigure(3, weight=1)
+        self.tab_api.rowconfigure(4, weight=1)
 
         topo = ttk.LabelFrame(self.tab_api, text="Controle de envio API", padding=10)
         topo.grid(row=0, column=0, sticky="ew")
@@ -497,8 +507,29 @@ class IntegracaoApp(BaseWindow):
             command=lambda: self._run_async(self._atualizar_monitor_api, channel="api"),
         ).grid(row=0, column=9, padx=(0, 8), sticky="w")
 
+        perfil = ttk.LabelFrame(self.tab_api, text="Cliente/API para envio", padding=10)
+        perfil.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        ttk.Label(perfil, text="Perfil ativo:").grid(row=0, column=0, sticky="w")
+        self.api_cliente_combo = ttk.Combobox(
+            perfil,
+            textvariable=self.api_cliente_switch_var,
+            state="readonly",
+            width=62,
+        )
+        self.api_cliente_combo.grid(row=0, column=1, padx=(6, 10), sticky="w")
+        ttk.Button(
+            perfil,
+            text="Ativar perfil",
+            command=lambda: self._run_async(self._ativar_cliente_api_por_selecao, channel="api"),
+        ).grid(row=0, column=2, padx=(0, 8), sticky="w")
+        ttk.Label(
+            perfil,
+            text="Use um perfil de homologacao/producao para alternar o destino da API sem trocar servico.",
+            style="SubTitle.TLabel",
+        ).grid(row=1, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
         win = ttk.LabelFrame(self.tab_api, text="Servicos Windows (API)", padding=10)
-        win.grid(row=1, column=0, sticky="ew", pady=(8, 0))
+        win.grid(row=2, column=0, sticky="ew", pady=(8, 0))
 
         ttk.Label(win, text="WinSvc API M:").grid(row=0, column=0, sticky="w")
         ttk.Combobox(
@@ -541,7 +572,7 @@ class IntegracaoApp(BaseWindow):
         ttk.Label(win, textvariable=self.windows_api_services_status_var).grid(row=0, column=8, padx=(8, 0), sticky="w")
 
         resumo = ttk.Frame(self.tab_api)
-        resumo.grid(row=2, column=0, sticky="ew", pady=(8, 0))
+        resumo.grid(row=3, column=0, sticky="ew", pady=(8, 0))
         resumo.columnconfigure(0, weight=1)
         resumo.columnconfigure(1, weight=1)
 
@@ -554,7 +585,7 @@ class IntegracaoApp(BaseWindow):
         ttk.Label(card_a, textvariable=self.monitor_api_afastamentos_var, justify=tk.LEFT).grid(row=0, column=0, sticky="w")
 
         output = ttk.LabelFrame(self.tab_api, text="Log de envio API", padding=10)
-        output.grid(row=3, column=0, sticky="nsew", pady=(8, 0))
+        output.grid(row=4, column=0, sticky="nsew", pady=(8, 0))
         output.columnconfigure(0, weight=1)
         output.rowconfigure(0, weight=1)
 
@@ -1410,14 +1441,15 @@ class IntegracaoApp(BaseWindow):
 
         origem_input = (self.int_map_origem_var.get() or "").strip()
         destino = (self.int_map_destino_var.get() or "").strip()
-        if not origem_input:
-            raise ValueError("Informe a coluna/caminho de origem.")
+        padrao = (self.int_map_padrao_var.get() or "").strip()
+        if not origem_input and not padrao:
+            raise ValueError("Informe origem ou um valor padrao.")
         if not destino:
             raise ValueError("Informe o campo de destino.")
 
         opcoes_colunas = self._atualizar_opcoes_colunas_de_para(log_line=True)
         origem = origem_input
-        if not origem_input.lower().startswith("colunas.") and "." not in origem_input and ":" not in origem_input:
+        if origem_input and not origem_input.lower().startswith("colunas.") and "." not in origem_input and ":" not in origem_input:
             coluna_resolvida = origem_input
             for coluna in opcoes_colunas:
                 if self._normalize_key(coluna) == self._normalize_key(origem_input):
@@ -1432,7 +1464,6 @@ class IntegracaoApp(BaseWindow):
             "ativo": bool(self.int_map_ativo_var.get()),
         }
 
-        padrao = (self.int_map_padrao_var.get() or "").strip()
         if padrao:
             regra["padrao"] = padrao
 
@@ -1466,12 +1497,59 @@ class IntegracaoApp(BaseWindow):
         self._render_de_para_tree()
         self._limpar_de_para_form()
 
+    def _atualizar_opcoes_cliente_api(self, *, active_id: str | None = None) -> None:
+        opcoes: list[str] = []
+        mapa: dict[str, str] = {}
+        selecionado = ""
+
+        for item in self.integracao_items:
+            rotulo = f"{item.nome} [{item.id[:8]}]"
+            opcoes.append(rotulo)
+            mapa[rotulo] = item.id
+            if active_id and item.id == active_id:
+                selecionado = rotulo
+
+        self._api_cliente_opcoes = mapa
+
+        if hasattr(self, "api_cliente_combo") and self.api_cliente_combo.winfo_exists():
+            self.api_cliente_combo.configure(values=opcoes)
+
+        if selecionado:
+            self.api_cliente_switch_var.set(selecionado)
+        elif opcoes:
+            atual = str(self.api_cliente_switch_var.get() or "").strip()
+            if atual not in mapa:
+                self.api_cliente_switch_var.set(opcoes[0])
+        else:
+            self.api_cliente_switch_var.set("")
+
+    def _ativar_cliente_api_por_selecao(self) -> None:
+        if not self.integracao_items:
+            raise ValueError("Nao ha clientes/API cadastrados.")
+
+        rotulo = str(self.api_cliente_switch_var.get() or "").strip()
+        if not rotulo:
+            raise ValueError("Selecione um perfil de cliente/API.")
+
+        cliente_id = self._api_cliente_opcoes.get(rotulo)
+        if not cliente_id:
+            raise ValueError("Perfil selecionado nao encontrado.")
+
+        self.registry.set_active(cliente_id)
+        self._carregar_configs_integracao(log_line=True)
+        self._set_status("Status: cliente/API ativo atualizado")
+        self._log_api(
+            "Cliente/API ativo alterado. "
+            "Se os servicos API estiverem rodando, a troca entra no proximo ciclo."
+        )
+
     def _carregar_configs_integracao(self, *, log_line: bool = False) -> None:
         self.integracao_items = self.registry.list_configs()
         active_id = self.registry.get_active_id()
         active = self.registry.get_active()
         label_ativo = f"Cliente API ativo: {active.nome}" if active else "Cliente API ativo: padrao (.env)"
         self.cliente_api_ativo_var.set(label_ativo)
+        self._atualizar_opcoes_cliente_api(active_id=active_id)
 
         if not self.integracao_items and not self.integracao_selected_id:
             default_cfg = self.registry.default_config()
@@ -1792,6 +1870,16 @@ class IntegracaoApp(BaseWindow):
         return (settings.win_service_motoristas_dev, settings.win_service_afastamentos_dev)
 
     def _nomes_servicos_windows_api_por_ambiente(self, ambiente: str) -> tuple[str, str]:
+        unico_m = str(settings.win_service_api_motoristas or "").strip()
+        unico_a = str(settings.win_service_api_afastamentos or "").strip()
+        if (ambiente or "").strip().lower() == "producao":
+            default_m = settings.win_service_api_motoristas_prod
+            default_a = settings.win_service_api_afastamentos_prod
+        else:
+            default_m = settings.win_service_api_motoristas_dev
+            default_a = settings.win_service_api_afastamentos_dev
+        if unico_m or unico_a:
+            return (unico_m or default_m, unico_a or default_a)
         if (ambiente or "").strip().lower() == "producao":
             return (settings.win_service_api_motoristas_prod, settings.win_service_api_afastamentos_prod)
         return (settings.win_service_api_motoristas_dev, settings.win_service_api_afastamentos_dev)

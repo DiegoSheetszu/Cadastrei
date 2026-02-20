@@ -6,8 +6,10 @@ from typing import Any
 
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import IntegrityError
 
 _IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_CHECK_LITERAL_RE = re.compile(r"N?'([^']+)'", re.IGNORECASE)
 
 
 def _safe_identifier(value: str, label: str) -> str:
@@ -35,6 +37,7 @@ class RepositorioFilaIntegracaoApi:
         self.tabela_motorista = _safe_identifier(tabela_motorista, "Tabela de motoristas")
         self.tabela_afastamento = _safe_identifier(tabela_afastamento, "Tabela de afastamentos")
         self._cache_colunas: dict[str, dict[str, str]] = {}
+        self._cache_status_sucesso: dict[str, list[str]] = {}
 
     def liberar_locks_expirados(self, lock_timeout_minutes: int = 15) -> dict[str, int]:
         return {
@@ -505,7 +508,6 @@ class RepositorioFilaIntegracaoApi:
             f"t.[{resolved['lock_em']}] = NULL",
         ]
         params: dict[str, Any] = {
-            "status": "PROCESSADO" if sucesso else "ERRO",
             "lock_id": lock_id,
         }
 
@@ -550,9 +552,98 @@ class RepositorioFilaIntegracaoApi:
             """
         )
 
-        with self.engine.begin() as conn:
-            result = conn.execute(sql, params)
-            return int(result.rowcount or 0) > 0
+        status_candidates = (
+            self._status_sucesso_candidates(table_name)
+            if sucesso
+            else ["ERRO"]
+        )
+
+        last_exc: Exception | None = None
+        for status_value in status_candidates:
+            params["status"] = status_value
+            try:
+                with self.engine.begin() as conn:
+                    result = conn.execute(sql, params)
+                    return int(result.rowcount or 0) > 0
+            except IntegrityError as exc:
+                # Alguns ambientes usam CHECK de status diferente
+                # (ex.: ENVIADO no lugar de PROCESSADO).
+                if not sucesso or not self._is_status_constraint_error(exc):
+                    raise
+                last_exc = exc
+                continue
+
+        if last_exc is not None:
+            raise last_exc
+        return False
+
+    def _status_sucesso_candidates(self, table_name: str) -> list[str]:
+        if table_name in self._cache_status_sucesso:
+            return self._cache_status_sucesso[table_name]
+
+        allowed = self._status_values_from_constraints(table_name)
+        preferred = ["PROCESSADO", "ENVIADO", "INTEGRADO", "CONCLUIDO", "SUCESSO", "OK"]
+        blocked = {"PENDENTE", "PROCESSANDO", "ERRO"}
+
+        candidates: list[str] = []
+        for value in preferred:
+            if allowed and value not in allowed:
+                continue
+            if value not in candidates:
+                candidates.append(value)
+
+        if allowed:
+            for value in allowed:
+                if value in blocked:
+                    continue
+                if value not in candidates:
+                    candidates.append(value)
+
+        if not candidates:
+            candidates = ["PROCESSADO"]
+
+        self._cache_status_sucesso[table_name] = candidates
+        return candidates
+
+    def _status_values_from_constraints(self, table_name: str) -> list[str]:
+        try:
+            with self.engine.connect() as conn:
+                rows = conn.execute(
+                    text(
+                        """
+                        SELECT cc.[definition]
+                        FROM sys.check_constraints AS cc
+                        INNER JOIN sys.tables AS t
+                            ON t.[object_id] = cc.[parent_object_id]
+                        INNER JOIN sys.schemas AS s
+                            ON s.[schema_id] = t.[schema_id]
+                        WHERE s.[name] = :schema
+                        AND t.[name] = :table_name
+                        """
+                    ),
+                    {"schema": self.schema, "table_name": table_name},
+                ).scalars().all()
+        except Exception:
+            return []
+
+        values: list[str] = []
+        seen: set[str] = set()
+        for raw_def in rows:
+            definition = str(raw_def or "")
+            if "status" not in definition.lower():
+                continue
+            for match in _CHECK_LITERAL_RE.findall(definition):
+                token = str(match or "").strip().upper()
+                if not token or token in seen:
+                    continue
+                seen.add(token)
+                values.append(token)
+        return values
+
+    @staticmethod
+    def _is_status_constraint_error(exc: Exception) -> bool:
+        message = str(exc).lower()
+        return ("constraint" in message and "status" in message) or "ck_" in message
 
     def _liberar_locks_expirados_tabela(
         self,

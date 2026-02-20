@@ -72,6 +72,14 @@ class Settings(BaseModel):
     api_motorista_sindicato_cnpj: str = Field(default="", alias="API_MOTORISTA_SINDICATO_CNPJ")
     api_motorista_sindicato_cidade: str = Field(default="", alias="API_MOTORISTA_SINDICATO_CIDADE")
     api_motorista_sindicato_uf: str = Field(default="", alias="API_MOTORISTA_SINDICATO_UF")
+    api_empregador_codigo: str = Field(default="152", alias="API_EMPREGADOR_CODIGO")
+    api_empregador_cnpj: str = Field(default="33899204000165", alias="API_EMPREGADOR_CNPJ")
+    api_empregador_nome: str = Field(
+        default="COMTRASIL COMERCIO E TRANSPORTES LTDA",
+        alias="API_EMPREGADOR_NOME",
+    )
+    api_empregador_cidade: str = Field(default="BRUMADO", alias="API_EMPREGADOR_CIDADE")
+    api_empregador_uf: str = Field(default="BA", alias="API_EMPREGADOR_UF")
 
     source_database_dev: str = Field(default="Vetorh_Hom", alias="SOURCE_DATABASE_DEV")
     source_database_prod: str = Field(default="Vetorh_Prod", alias="SOURCE_DATABASE_PROD")
@@ -106,6 +114,14 @@ class Settings(BaseModel):
     win_service_api_afastamentos_prod: str = Field(
         default="CadastreiApiAfastamentosProd",
         alias="WIN_SERVICE_API_AFASTAMENTOS_PROD",
+    )
+    win_service_api_motoristas: str = Field(
+        default="",
+        alias="WIN_SERVICE_API_MOTORISTAS",
+    )
+    win_service_api_afastamentos: str = Field(
+        default="",
+        alias="WIN_SERVICE_API_AFASTAMENTOS",
     )
 
     def databases(self) -> list[str]:
