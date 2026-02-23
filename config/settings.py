@@ -68,10 +68,14 @@ class Settings(BaseModel):
     api_sync_retry_max_seconds: int = Field(default=3600, alias="API_SYNC_RETRY_MAX_SECONDS")
     api_default_cidade: str = Field(default="NAO INFORMADO", alias="API_DEFAULT_CIDADE")
     api_default_uf: str = Field(default="SC", alias="API_DEFAULT_UF")
-    api_motorista_sindicato_nome: str = Field(default="", alias="API_MOTORISTA_SINDICATO_NOME")
-    api_motorista_sindicato_cnpj: str = Field(default="", alias="API_MOTORISTA_SINDICATO_CNPJ")
-    api_motorista_sindicato_cidade: str = Field(default="", alias="API_MOTORISTA_SINDICATO_CIDADE")
-    api_motorista_sindicato_uf: str = Field(default="", alias="API_MOTORISTA_SINDICATO_UF")
+    api_motorista_sindicato_codigo: str = Field(default="273", alias="API_MOTORISTA_SINDICATO_CODIGO")
+    api_motorista_sindicato_nome: str = Field(
+        default="SIND TRAB TRANSP ROD PASSAG CARGAS FRET TURISMO PESSOAL",
+        alias="API_MOTORISTA_SINDICATO_NOME",
+    )
+    api_motorista_sindicato_cnpj: str = Field(default="00063854700096", alias="API_MOTORISTA_SINDICATO_CNPJ")
+    api_motorista_sindicato_cidade: str = Field(default="Vitoria da Conquista", alias="API_MOTORISTA_SINDICATO_CIDADE")
+    api_motorista_sindicato_uf: str = Field(default="BA", alias="API_MOTORISTA_SINDICATO_UF")
     api_empregador_codigo: str = Field(default="152", alias="API_EMPREGADOR_CODIGO")
     api_empregador_cnpj: str = Field(default="33899204000165", alias="API_EMPREGADOR_CNPJ")
     api_empregador_nome: str = Field(

@@ -38,6 +38,8 @@ class RepositorioFilaIntegracaoApi:
         self.tabela_afastamento = _safe_identifier(tabela_afastamento, "Tabela de afastamentos")
         self._cache_colunas: dict[str, dict[str, str]] = {}
         self._cache_status_sucesso: dict[str, list[str]] = {}
+        self._cache_tabela_empresa_dict: dict[str, str] | None = None
+        self._cache_tabela_sindicato_dict: dict[str, str] | None = None
 
     def liberar_locks_expirados(self, lock_timeout_minutes: int = 15) -> dict[str, int]:
         return {
@@ -83,7 +85,10 @@ class RepositorioFilaIntegracaoApi:
                 "versao_payload": "VersaoPayload",
                 "hash_payload": "HashPayload",
             },
-            optional_key_columns={"numemp": "NumEmp"},
+            optional_key_columns={
+                "numemp": "NumEmp",
+                "numero_sindicato": "NumeroSindicato",
+            },
         )
 
     def capturar_afastamentos_pendentes(
@@ -110,6 +115,7 @@ class RepositorioFilaIntegracaoApi:
                 "versao_payload": "VersaoPayload",
                 "hash_payload": "HashPayload",
             },
+            optional_key_columns={"numero_sindicato": "NumeroSindicato"},
         )
 
     def buscar_colunas_motorista_por_evento(
@@ -128,7 +134,10 @@ class RepositorioFilaIntegracaoApi:
                 "versao_payload": "VersaoPayload",
                 "hash_payload": "HashPayload",
             },
-            optional_key_columns={"numemp": "NumEmp"},
+            optional_key_columns={
+                "numemp": "NumEmp",
+                "numero_sindicato": "NumeroSindicato",
+            },
         )
 
     def buscar_colunas_afastamento_por_evento(
@@ -151,7 +160,73 @@ class RepositorioFilaIntegracaoApi:
                 "versao_payload": "VersaoPayload",
                 "hash_payload": "HashPayload",
             },
+            optional_key_columns={"numero_sindicato": "NumeroSindicato"},
         )
+
+    def buscar_pessoa_juridica_por_codigo(
+        self,
+        *,
+        codigo_empresa: int | None,
+        tipo_pessoa: str,
+        cliente_api_id: str | None = None,  # compatibilidade (nao utilizado no Dict simples)
+        ambiente: str | None = None,        # compatibilidade (nao utilizado no Dict simples)
+    ) -> dict[str, Any] | None:
+        if codigo_empresa is None:
+            return None
+
+        tipo = str(tipo_pessoa or "").strip().upper()
+        if tipo == "EMPREGADOR":
+            resolved = self._resolver_colunas_empresa_dict()
+            table_name = "EmpresaDict"
+        elif tipo == "SINDICATO":
+            resolved = self._resolver_colunas_sindicato_dict()
+            table_name = "SindicatoDict"
+        else:
+            return None
+        if not resolved:
+            return None
+
+        where_parts = [
+            f"t.[{resolved['codigo']}] = :codigo",
+        ]
+        if "ativo" in resolved:
+            where_parts.append(f"ISNULL(t.[{resolved['ativo']}], 1) = 1")
+
+        select_parts = [
+            f"t.[{resolved['nome']}] AS [nome]",
+            f"t.[{resolved['cnpj']}] AS [cnpj]",
+            f"t.[{resolved['cidade']}] AS [cidade]",
+            f"t.[{resolved['uf']}] AS [uf]",
+        ]
+        select_parts.append(f"t.[{resolved['codigo']}] AS [codigo_pessoa]")
+        for opt_alias in ("rua", "numero", "complemento", "bairro", "cep", "latitude", "longitude"):
+            if opt_alias in resolved:
+                select_parts.append(f"t.[{resolved[opt_alias]}] AS [{opt_alias}]")
+
+        order_parts: list[str] = []
+        if "atualizado_em" in resolved:
+            order_parts.append(f"t.[{resolved['atualizado_em']}] DESC")
+        order_parts.append(f"t.[{resolved['codigo']}] ASC")
+
+        params: dict[str, Any] = {
+            "codigo": int(codigo_empresa),
+        }
+
+        sql = text(
+            f"""
+            SELECT TOP 1
+                {', '.join(select_parts)}
+            FROM [{self.schema}].[{table_name}] AS t
+            WHERE {' AND '.join(where_parts)}
+            ORDER BY {', '.join(order_parts)}
+            """
+        )
+
+        with self.engine.connect() as conn:
+            row = conn.execute(sql, params).mappings().first()
+        if not row:
+            return None
+        return dict(row)
 
     def marcar_motorista_sucesso(
         self,
@@ -716,6 +791,72 @@ class RepositorioFilaIntegracaoApi:
             if key in lookup:
                 resolved[alias] = lookup[key]
 
+        return resolved
+
+    def _resolver_colunas_empresa_dict(self) -> dict[str, str] | None:
+        if self._cache_tabela_empresa_dict is not None:
+            return self._cache_tabela_empresa_dict
+
+        try:
+            resolved = self._resolver_colunas(
+                "EmpresaDict",
+                required_columns={
+                    "codigo": "NumEmp",
+                    "nome": "Nome",
+                    "cnpj": "Cnpj",
+                    "cidade": "Cidade",
+                    "uf": "Uf",
+                },
+                optional_columns={
+                    "ativo": "Ativo",
+                    "atualizado_em": "AtualizadoEm",
+                    "rua": "Rua",
+                    "numero": "Numero",
+                    "complemento": "Complemento",
+                    "bairro": "Bairro",
+                    "cep": "Cep",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                },
+            )
+        except Exception:
+            self._cache_tabela_empresa_dict = {}
+            return None
+
+        self._cache_tabela_empresa_dict = resolved
+        return resolved
+
+    def _resolver_colunas_sindicato_dict(self) -> dict[str, str] | None:
+        if self._cache_tabela_sindicato_dict is not None:
+            return self._cache_tabela_sindicato_dict
+
+        try:
+            resolved = self._resolver_colunas(
+                "SindicatoDict",
+                required_columns={
+                    "codigo": "NumeroSindicato",
+                    "nome": "Nome",
+                    "cnpj": "Cnpj",
+                    "cidade": "Cidade",
+                    "uf": "Uf",
+                },
+                optional_columns={
+                    "ativo": "Ativo",
+                    "atualizado_em": "AtualizadoEm",
+                    "rua": "Rua",
+                    "numero": "Numero",
+                    "complemento": "Complemento",
+                    "bairro": "Bairro",
+                    "cep": "Cep",
+                    "latitude": "Latitude",
+                    "longitude": "Longitude",
+                },
+            )
+        except Exception:
+            self._cache_tabela_sindicato_dict = {}
+            return None
+
+        self._cache_tabela_sindicato_dict = resolved
         return resolved
 
     def _carregar_colunas_tabela(self, table_name: str) -> dict[str, str]:

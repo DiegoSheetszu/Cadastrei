@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from Consultas_dbo.afastamentos.afastamentos import RepositorioAfastamentos
 from Consultas_dbo.cadastrei.afastamento import RepositorioAfastamento
 from Ferramentas.montar_payload_afastamentos import montar_payload_afastamentos
+from config.settings import settings
 
 
 @dataclass
@@ -144,6 +145,8 @@ class AfastamentoSyncService:
                     "situacao": situacao,
                     "descricao": str(row.get("obsafa") or descricao_situacao or row.get("sitafa") or "Afastamento"),
                     "descricao_situacao": descricao_situacao or None,
+                    "codigo_empresa_contratante": numempresa,
+                    "numero_sindicato": settings.api_motorista_sindicato_codigo,
                     "operacao": operacao,
                     "evento_tipo": "AFASTAMENTO_UPSERT",
                     "versao_payload": "v1",

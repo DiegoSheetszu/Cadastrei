@@ -164,10 +164,11 @@
               "ativo": true
             },
             {
-              "origem": "payload.descricao",
+              "origem": "payload.descricaodasituacao",
               "destino": "descricao",
               "obrigatorio": true,
-              "ativo": true
+              "ativo": true,
+              "padrao": "Afastamento"
             },
             {
               "origem": "payload.descricaodasituacao",

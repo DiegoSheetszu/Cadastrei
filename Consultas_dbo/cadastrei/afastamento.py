@@ -470,6 +470,9 @@ class RepositorioAfastamento:
             "HoraDoTermino": "horter",
             "Descricao": "descricao",
             "DescricaoDaSituacao": "descricao_situacao",
+            "CodigoEmpresaContratante": "codigo_empresa_contratante",
+            "NumeroSindicato": "numero_sindicato",
+            "CodigoSindicato": "numero_sindicato",
             "OrigemSistema": "origem_sistema",
             "UsuarioBanco": "usuario_banco",
             "ProximaTentativaEm": "proxima_tentativa_em",
@@ -501,6 +504,10 @@ class RepositorioAfastamento:
             "situacao": int(evento["situacao"]),
             "descricao": evento.get("descricao"),
             "descricao_situacao": evento.get("descricao_situacao"),
+            "codigo_empresa_contratante": evento.get("codigo_empresa_contratante"),
+            "numero_sindicato": evento.get("numero_sindicato")
+            if evento.get("numero_sindicato") is not None
+            else evento.get("codigo_sindicato"),
             "operacao": evento["operacao"],
             "evento_tipo": evento.get("evento_tipo") or "AFASTAMENTO_UPSERT",
             "versao_payload": evento.get("versao_payload") or "v1",

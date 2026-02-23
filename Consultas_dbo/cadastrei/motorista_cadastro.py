@@ -58,6 +58,9 @@ _COLUNAS_ESPELHO_DIRETAS = {
     "DDD": "ddd",
     "NumeroDeTelefone": "numero_de_telefone",
     "NumEmp": "numemp",
+    "CodigoEmpresaContratante": "codigo_empresa_contratante",
+    "NumeroSindicato": "numero_sindicato",
+    "CodigoSindicato": "numero_sindicato",
 }
 
 
@@ -449,6 +452,10 @@ class RepositorioMotoristaCadastro:
             "ddd": evento.get("ddd"),
             "numero_de_telefone": evento.get("numero_de_telefone"),
             "numemp": evento.get("numemp"),
+            "codigo_empresa_contratante": evento.get("codigo_empresa_contratante"),
+            "numero_sindicato": evento.get("numero_sindicato")
+            if evento.get("numero_sindicato") is not None
+            else evento.get("codigo_sindicato"),
         }
 
         params = {

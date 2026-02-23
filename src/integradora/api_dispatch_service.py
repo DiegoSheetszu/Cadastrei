@@ -60,6 +60,8 @@ class ApiDispatchService:
         self.retry_base_seconds = max(1, int(retry_base_seconds))
         self.retry_max_seconds = max(self.retry_base_seconds, int(retry_max_seconds))
         self.integration_config = dict(integration_config or {})
+        self.cliente_api_id = str(self.integration_config.get("id") or "").strip() or None
+        self.ambiente_api = str(self.integration_config.get("ambiente") or "").strip().upper() or None
         self.endpoint_motorista = (
             endpoint_motorista
             or str(self.integration_config.get("endpoint_motorista") or settings.api_motorista_endpoint)
@@ -179,10 +181,10 @@ class ApiDispatchService:
                 )
                 payload_origem = self._montar_origem_de_para(payload, evento=evento, colunas=colunas_origem)
                 payload = self._aplicar_de_para(payload_origem, contexto="motoristas")
-            else:
-                payload = self._enriquecer_payload_motorista(payload)
-                self._validar_payload_motorista(payload)
+            payload = self._enriquecer_payload_motorista(payload)
             payload = self._enriquecer_payload_empregador(payload, evento=evento)
+            payload = self._enriquecer_payload_sindicato(payload, evento=evento)
+            self._validar_payload_motorista(payload)
             response = self.api_client.post_json(self.endpoint_motorista, payload)
         except Exception as exc:
             return self._registrar_erro_motorista(
@@ -219,9 +221,8 @@ class ApiDispatchService:
                 )
                 payload_origem = self._montar_origem_de_para(payload, evento=evento, colunas=colunas_origem)
                 payload = self._aplicar_de_para(payload_origem, contexto="afastamentos")
-            else:
-                self._validar_payload_afastamento(payload)
             payload = self._enriquecer_payload_empregador(payload, evento=evento)
+            self._validar_payload_afastamento(payload)
             response = self.api_client.post_json(self.endpoint_afastamento, payload)
         except Exception as exc:
             return self._registrar_erro_afastamento(
@@ -352,56 +353,138 @@ class ApiDispatchService:
     def _enriquecer_payload_empregador(self, payload: dict[str, Any], *, evento: dict[str, Any]) -> dict[str, Any]:
         enriched = dict(payload)
 
-        empregador_raw = enriched.get("empregador")
-        if isinstance(empregador_raw, dict):
-            empregador = dict(empregador_raw)
-        else:
-            empregador = {}
+        codigo = self._resolver_codigo_empresa(enriched, evento)
+        mapped = self._buscar_pessoa_juridica(codigo=codigo, tipo_pessoa="EMPREGADOR")
+        fallback = self._empregador_padrao_por_codigo(codigo)
 
-        codigo = self._resolver_codigo_empregador(enriched, evento)
-        if codigo:
-            empregador.setdefault("codigo", codigo)
+        atual_raw = enriched.get("empregador")
+        atual = dict(atual_raw) if isinstance(atual_raw, dict) else {}
+        merged = self._merge_pessoa_juridica(atual, mapped)
+        merged = self._merge_pessoa_juridica(merged, fallback)
 
-        codigo_regra = str(settings.api_empregador_codigo or "").strip()
-        if codigo and codigo_regra and codigo == codigo_regra:
-            cnpj_padrao = str(settings.api_empregador_cnpj or "").strip()
-            nome_padrao = str(settings.api_empregador_nome or "").strip()
-            cidade_padrao = str(settings.api_empregador_cidade or "").strip()
-            uf_padrao = str(settings.api_empregador_uf or "").strip().upper()
+        if codigo and str(merged.get("codigo") or "").strip() == "":
+            merged["codigo"] = codigo
 
-            if cnpj_padrao:
-                empregador.setdefault("cnpj", cnpj_padrao)
-            if nome_padrao:
-                empregador.setdefault("nome", nome_padrao)
-
-            endereco_raw = empregador.get("endereco")
-            if isinstance(endereco_raw, dict):
-                endereco = dict(endereco_raw)
-            else:
-                endereco = {}
-            if cidade_padrao:
-                endereco.setdefault("cidade", cidade_padrao)
-            if uf_padrao:
-                endereco.setdefault("uf", uf_padrao)
-            if endereco:
-                empregador["endereco"] = endereco
-
-        if empregador:
-            enriched["empregador"] = empregador
+        if merged:
+            enriched["empregador"] = merged
 
         return enriched
 
+    def _enriquecer_payload_sindicato(self, payload: dict[str, Any], *, evento: dict[str, Any]) -> dict[str, Any]:
+        enriched = dict(payload)
+
+        codigo_sindicato = self._resolver_codigo_sindicato(enriched, evento)
+        mapped = self._buscar_pessoa_juridica(codigo=codigo_sindicato, tipo_pessoa="SINDICATO")
+        fallback = self._sindicato_padrao()
+
+        atual_raw = enriched.get("sindicato")
+        atual = dict(atual_raw) if isinstance(atual_raw, dict) else {}
+        merged = self._merge_pessoa_juridica(atual, mapped)
+        merged = self._merge_pessoa_juridica(merged, fallback)
+        if codigo_sindicato and str(merged.get("codigo") or "").strip() == "":
+            merged["codigo"] = codigo_sindicato
+
+        if merged:
+            enriched["sindicato"] = merged
+
+        return enriched
+
+    def _buscar_pessoa_juridica(self, *, codigo: str, tipo_pessoa: str) -> dict[str, Any] | None:
+        codigo = str(codigo or "").strip()
+        if not codigo:
+            return None
+        try:
+            codigo_int = int(float(codigo.replace(",", ".")))
+        except Exception:
+            return None
+
+        found = self.repo.buscar_pessoa_juridica_por_codigo(
+            codigo_empresa=codigo_int,
+            tipo_pessoa=tipo_pessoa,
+            cliente_api_id=self.cliente_api_id,
+            ambiente=self.ambiente_api,
+        )
+        if not isinstance(found, dict):
+            return None
+
+        nome = str(found.get("nome") or "").strip()
+        cnpj = "".join(ch for ch in str(found.get("cnpj") or "") if ch.isdigit())
+        cidade = str(found.get("cidade") or "").strip()
+        uf = str(found.get("uf") or "").strip().upper()
+        if not (nome and cnpj and cidade and uf):
+            return None
+
+        endereco: dict[str, Any] = {
+            "cidade": cidade,
+            "uf": uf,
+        }
+        for key in ("rua", "numero", "complemento", "bairro", "cep", "latitude", "longitude"):
+            value = found.get(key)
+            if value is None:
+                continue
+            text_value = str(value).strip()
+            if text_value == "":
+                continue
+            endereco[key] = value
+
+        codigo_pessoa = str(found.get("codigo_pessoa") or "").strip()
+        codigo_final = codigo_pessoa or str(codigo_int)
+
+        result: dict[str, Any] = {
+            "nome": nome,
+            "cnpj": cnpj,
+            "endereco": endereco,
+        }
+        result["codigo"] = codigo_final
+        return result
+
     @staticmethod
-    def _resolver_codigo_empregador(payload: dict[str, Any], evento: dict[str, Any]) -> str:
+    def _merge_pessoa_juridica(
+        atual: dict[str, Any] | None,
+        fonte: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        base = dict(atual or {})
+        src = dict(fonte or {})
+        if not src:
+            return base
+
+        for key in ("codigo", "nome", "cnpj"):
+            if str(base.get(key) or "").strip() == "":
+                value = src.get(key)
+                if value is not None and str(value).strip() != "":
+                    base[key] = value
+
+        end_base_raw = base.get("endereco")
+        end_base = dict(end_base_raw) if isinstance(end_base_raw, dict) else {}
+        end_src_raw = src.get("endereco")
+        end_src = dict(end_src_raw) if isinstance(end_src_raw, dict) else {}
+        for key in ("rua", "numero", "complemento", "bairro", "cidade", "uf", "cep", "latitude", "longitude"):
+            if key not in end_src:
+                continue
+            if str(end_base.get(key) or "").strip() == "":
+                value = end_src.get(key)
+                if value is not None and str(value).strip() != "":
+                    end_base[key] = value
+        if end_base:
+            base["endereco"] = end_base
+        return base
+
+    @staticmethod
+    def _resolver_codigo_empresa(payload: dict[str, Any], evento: dict[str, Any]) -> str:
         candidatos = [
             payload.get("empregador", {}).get("codigo")
             if isinstance(payload.get("empregador"), dict)
             else None,
+            payload.get("codigoempresacontratante"),
+            payload.get("codigo_empresa_contratante"),
             payload.get("numerodaempresa"),
             payload.get("numempresa"),
             payload.get("numemp"),
+            evento.get("codigoempresacontratante"),
+            evento.get("codigo_empresa_contratante"),
             evento.get("numempresa"),
             evento.get("numemp"),
+            settings.api_empregador_codigo,
         ]
 
         for candidato in candidatos:
@@ -411,6 +494,55 @@ class ApiDispatchService:
             if txt:
                 return txt
         return ""
+
+    @staticmethod
+    def _resolver_codigo_sindicato(payload: dict[str, Any], evento: dict[str, Any]) -> str:
+        candidatos = [
+            payload.get("sindicato", {}).get("codigo")
+            if isinstance(payload.get("sindicato"), dict)
+            else None,
+            payload.get("numerosindicato"),
+            payload.get("numero_sindicato"),
+            payload.get("codigosindicato"),
+            payload.get("codigo_sindicato"),
+            evento.get("numero_sindicato"),
+            evento.get("numerosindicato"),
+            evento.get("codigosindicato"),
+            evento.get("codigo_sindicato"),
+            settings.api_motorista_sindicato_codigo,
+        ]
+
+        for candidato in candidatos:
+            if candidato is None:
+                continue
+            txt = str(candidato).strip()
+            if txt:
+                return txt
+        return ""
+
+    @staticmethod
+    def _empregador_padrao_por_codigo(codigo_empresa: str) -> dict[str, Any] | None:
+        codigo = str(codigo_empresa or "").strip()
+        codigo_regra = str(settings.api_empregador_codigo or "").strip()
+        if not codigo or not codigo_regra or codigo != codigo_regra:
+            return None
+
+        cnpj = "".join(ch for ch in str(settings.api_empregador_cnpj or "") if ch.isdigit())
+        nome = str(settings.api_empregador_nome or "").strip()
+        cidade = str(settings.api_empregador_cidade or "").strip()
+        uf = str(settings.api_empregador_uf or "").strip().upper()
+        if not (cnpj and nome and cidade and uf):
+            return None
+
+        return {
+            "codigo": codigo_regra,
+            "nome": nome,
+            "cnpj": cnpj,
+            "endereco": {
+                "cidade": cidade,
+                "uf": uf,
+            },
+        }
 
     @staticmethod
     def _validar_payload_afastamento(payload: dict[str, Any]) -> None:
@@ -424,6 +556,10 @@ class ApiDispatchService:
             raise ValueError("Payload de afastamento sem descricao.")
         if not datainicio:
             raise ValueError("Payload de afastamento sem datainicio.")
+        ApiDispatchService._validar_pessoa_juridica_obrigatoria(
+            payload.get("empregador"),
+            "empregador",
+        )
 
     @staticmethod
     def _validar_payload_motorista(payload: dict[str, Any]) -> None:
@@ -442,6 +578,34 @@ class ApiDispatchService:
             raise ValueError("Payload de motorista sem endereco.")
         if not str(endereco.get("cidade") or "").strip() or not str(endereco.get("uf") or "").strip():
             raise ValueError("Endereco do motorista sem cidade/UF.")
+        ApiDispatchService._validar_pessoa_juridica_obrigatoria(
+            payload.get("empregador"),
+            "empregador",
+        )
+        ApiDispatchService._validar_pessoa_juridica_obrigatoria(
+            payload.get("sindicato"),
+            "sindicato",
+        )
+
+    @staticmethod
+    def _validar_pessoa_juridica_obrigatoria(pessoa: Any, campo: str) -> None:
+        if not isinstance(pessoa, dict):
+            raise ValueError(f"Payload sem {campo}.")
+
+        nome = str(pessoa.get("nome") or "").strip()
+        cnpj = "".join(ch for ch in str(pessoa.get("cnpj") or "") if ch.isdigit())
+        if not nome:
+            raise ValueError(f"{campo}.nome obrigatorio nao informado.")
+        if not cnpj:
+            raise ValueError(f"{campo}.cnpj obrigatorio nao informado.")
+
+        endereco = pessoa.get("endereco")
+        if not isinstance(endereco, dict):
+            raise ValueError(f"{campo}.endereco obrigatorio nao informado.")
+        cidade = str(endereco.get("cidade") or "").strip()
+        uf = str(endereco.get("uf") or "").strip().upper()
+        if not cidade or not uf:
+            raise ValueError(f"{campo}.endereco sem cidade/UF.")
 
     @staticmethod
     def _resposta_indica_sucesso(response: ApiResponse) -> bool:
@@ -494,15 +658,16 @@ class ApiDispatchService:
 
     @staticmethod
     def _sindicato_padrao() -> dict[str, Any] | None:
+        codigo = str(settings.api_motorista_sindicato_codigo or "").strip()
         nome = str(settings.api_motorista_sindicato_nome or "").strip()
-        cnpj = str(settings.api_motorista_sindicato_cnpj or "").strip()
+        cnpj = "".join(ch for ch in str(settings.api_motorista_sindicato_cnpj or "") if ch.isdigit())
         cidade = str(settings.api_motorista_sindicato_cidade or "").strip()
         uf = str(settings.api_motorista_sindicato_uf or "").strip().upper()
 
         if not (nome and cnpj and cidade and uf):
             return None
 
-        return {
+        result = {
             "nome": nome,
             "cnpj": cnpj,
             "endereco": {
@@ -510,6 +675,9 @@ class ApiDispatchService:
                 "uf": uf,
             },
         }
+        if codigo:
+            result["codigo"] = codigo
+        return result
 
     @staticmethod
     def _extrair_colunas_origem(regras: list[dict[str, Any]]) -> list[str]:

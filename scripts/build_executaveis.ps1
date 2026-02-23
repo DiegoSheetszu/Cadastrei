@@ -234,40 +234,35 @@ if (Test-Path $clientesApiOrigem) {
     }
 }
 
-$envExampleOrigem = Join-Path $repo ".env.example"
-$envExampleDestino = Join-Path $DestinoRaiz ".env.example"
-if (Test-Path $envExampleOrigem) {
-    Copy-Item $envExampleOrigem $envExampleDestino -Force
-
-    $targetsEnvExample = @()
-    if ($buildProd) {
-        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env.example")
-        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env.example")
-        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiMotoristasProd\.env.example")
-        $targetsEnvExample += (Join-Path $appsProdPath "CadastreiApiAfastamentosProd\.env.example")
-    }
-    if ($buildHom) {
-        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env.example")
-        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env.example")
-        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiMotoristasHom\.env.example")
-        $targetsEnvExample += (Join-Path $appsHomPath "CadastreiApiAfastamentosHom\.env.example")
-    }
-    if ($IncluirInterface) {
-        $targetsEnvExample += (Join-Path $appsUiPath "CadastreiInterface\.env.example")
-    }
-
-    foreach ($target in $targetsEnvExample) {
-        $targetDir = Split-Path -Parent $target
-        if (Test-Path $targetDir) {
-            Copy-Item $envExampleOrigem $target -Force
-        }
-    }
-}
-
 $installScriptOrigem = Join-Path $repo "scripts\instalar_servicos_nssm.ps1"
 $installScriptDestino = Join-Path $deployPath "instalar_servicos_nssm.ps1"
 if (Test-Path $installScriptOrigem) {
     Copy-Item $installScriptOrigem $installScriptDestino -Force
+}
+
+# Remove copias legadas de .env.example no pacote de deploy.
+$legacyEnvExamples = @(
+    (Join-Path $DestinoRaiz ".env.example")
+)
+if ($buildProd) {
+    $legacyEnvExamples += (Join-Path $appsProdPath "CadastreiMotoristasProd\.env.example")
+    $legacyEnvExamples += (Join-Path $appsProdPath "CadastreiAfastamentosProd\.env.example")
+    $legacyEnvExamples += (Join-Path $appsProdPath "CadastreiApiMotoristasProd\.env.example")
+    $legacyEnvExamples += (Join-Path $appsProdPath "CadastreiApiAfastamentosProd\.env.example")
+}
+if ($buildHom) {
+    $legacyEnvExamples += (Join-Path $appsHomPath "CadastreiMotoristasHom\.env.example")
+    $legacyEnvExamples += (Join-Path $appsHomPath "CadastreiAfastamentosHom\.env.example")
+    $legacyEnvExamples += (Join-Path $appsHomPath "CadastreiApiMotoristasHom\.env.example")
+    $legacyEnvExamples += (Join-Path $appsHomPath "CadastreiApiAfastamentosHom\.env.example")
+}
+if ($IncluirInterface) {
+    $legacyEnvExamples += (Join-Path $appsUiPath "CadastreiInterface\.env.example")
+}
+foreach ($legacyFile in $legacyEnvExamples) {
+    if (Test-Path $legacyFile) {
+        Remove-Item $legacyFile -Force -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host ""

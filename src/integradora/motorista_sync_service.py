@@ -12,6 +12,7 @@ from sqlalchemy.engine import Engine
 from Consultas_dbo.cadastrei.motorista_cadastro import RepositorioMotoristaCadastro
 from Consultas_dbo.cadastro_motoristas.cadastro_motoristas import RepositorioCadastroMotoristas
 from Ferramentas.montar_payload_motoristas import montar_payload_motoristas
+from config.settings import settings
 
 
 @dataclass
@@ -180,6 +181,8 @@ class MotoristaSyncService:
                     "ddd": origem.get("dddtel"),
                     "numero_de_telefone": origem.get("numtel"),
                     "numemp": origem.get("numemp"),
+                    "codigo_empresa_contratante": origem.get("numemp"),
+                    "numero_sindicato": settings.api_motorista_sindicato_codigo,
                 }
             )
             hashes_novos.append({"id_de_origem": numcad, "hash_payload": hash_payload})
