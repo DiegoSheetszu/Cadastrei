@@ -733,6 +733,7 @@ class ApiDispatchService:
             destino = str(raw.get("destino") or raw.get("target") or raw.get("to") or "").strip()
             if not destino:
                 continue
+            origem = ApiDispatchService._normalizar_origem_de_para(origem=origem, destino=destino)
 
             regra: dict[str, Any] = {
                 "nome": str(raw.get("nome") or f"regra_{idx}").strip(),
@@ -747,6 +748,14 @@ class ApiDispatchService:
             result.append(regra)
 
         return result
+
+    @staticmethod
+    def _normalizar_origem_de_para(*, origem: str, destino: str) -> str:
+        origem_norm = str(origem or "").strip()
+        destino_norm = str(destino or "").strip().lower()
+        if origem_norm.lower() == "payload.descricao" and destino_norm in {"descricao", "descricaodasituacao"}:
+            return "payload.descricaodasituacao"
+        return origem_norm
 
     def _aplicar_de_para(self, payload_origem: dict[str, Any], *, contexto: str) -> dict[str, Any]:
         payload_destino: dict[str, Any] = {}

@@ -285,6 +285,7 @@ class IntegracaoRegistry:
             destino = str(rule.get("destino") or rule.get("target") or rule.get("to") or "").strip()
             if not destino:
                 continue
+            origem = IntegracaoRegistry._normalizar_origem_de_para(origem=origem, destino=destino)
 
             clean_rule: dict[str, Any] = {
                 "origem": origem,
@@ -305,6 +306,14 @@ class IntegracaoRegistry:
             result.append(clean_rule)
 
         return result
+
+    @staticmethod
+    def _normalizar_origem_de_para(*, origem: str, destino: str) -> str:
+        origem_norm = str(origem or "").strip()
+        destino_norm = str(destino or "").strip().lower()
+        if origem_norm.lower() == "payload.descricao" and destino_norm in {"descricao", "descricaodasituacao"}:
+            return "payload.descricaodasituacao"
+        return origem_norm
 
     @staticmethod
     def _default_de_para_motoristas() -> list[dict[str, Any]]:
