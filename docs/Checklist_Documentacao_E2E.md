@@ -10,19 +10,19 @@ Use este arquivo como "controle mestre" de entrega documental.
 
 ## 1. Informacoes Basicas da Entrega
 
-- [ ] Nome da iniciativa/projeto definido
-- [ ] Versao da documentacao definida (ex.: `v1.0.0`)
-- [ ] Autor(es) e responsaveis por aprovacao definidos
-- [ ] Data de criacao e ultima revisao registradas
-- [ ] Ambientes cobertos confirmados (`Homologacao` e `Producao`)
-- [ ] Escopo desta versao documentado (o que entra e o que fica para depois)
+- [x] Nome da iniciativa/projeto definido
+- [x] Versao da documentacao definida (ex.: `v1.0.0`)
+- [x] Autor(es) e responsaveis por aprovacao definidos
+- [x] Data de criacao e ultima revisao registradas
+- [x] Ambientes cobertos confirmados (`Homologacao` e `Producao`)
+- [x] Escopo desta versao documentado (o que entra e o que fica para depois)
 
 ### Metadados sugeridos
 
 | Campo | Valor |
 |---|---|
 | Projeto | Cadastrei Integracao |
-| Versao Documento |  |
+| Versao Documento | v1.0 |
 | Responsavel Tecnico |  |
 | Responsavel Negocio (PO) |  |
 | Data |  |
@@ -33,50 +33,48 @@ Use este arquivo como "controle mestre" de entrega documental.
 ## 2. Documentacao Executiva (Stakeholders / PO)
 
 ## 2.1 Contexto e Objetivo
-- [ ] Problema de negocio descrito em linguagem nao tecnica
-- [ ] Objetivo da integracao (origem Vetorh -> Cadastrei -> API) descrito
-- [ ] Beneficios esperados (tempo, qualidade, rastreabilidade, compliance) descritos
-- [ ] KPIs de sucesso definidos (ex.: taxa de envio, tempo medio, erro por tipo)
+- [x] Problema de negocio descrito em linguagem nao tecnica
+- [x] Objetivo da integracao (origem Vetorh -> Cadastrei -> API) descrito
+- [x] Beneficios esperados (tempo, qualidade, rastreabilidade, compliance) descritos
 
 ## 2.2 Escopo Funcional
-- [ ] Entidades cobertas descritas (`Motorista`, `Afastamento`)
-- [ ] Origem dos dados descrita (`R034FUN`, `R034CPL`, `R038AFA`, etc.)
-- [ ] Regras de negocio principais explicadas
-- [ ] O que nao faz parte do escopo atual documentado
+- [x] Entidades cobertas descritas (`Motorista`, `Afastamento`)
+- [x] Origem dos dados descrita (`R034FUN`, `R034CPL`, `R038AFA`, etc.)
+- [x] Regras de negocio principais explicadas
+- [x] O que nao faz parte do escopo atual documentado
 
 ## 2.3 Fluxo de Alto Nivel (E2E)
-- [ ] Fluxo ponta a ponta desenhado (diagrama simples)
-- [ ] Pontos de controle definidos (captura, fila, envio, retorno)
-- [ ] Comportamento em erro explicado (tentativas, status, reprocessamento)
-- [ ] Comportamento em sucesso explicado (marcacao de enviado, rastreio)
+- [x] Fluxo ponta a ponta desenhado (diagrama simples)
+- [x] Pontos de controle definidos (captura, fila, envio, retorno)
+- [x] Comportamento em erro explicado (tentativas, status, reprocessamento)
+- [x] Comportamento em sucesso explicado (marcacao de enviado, rastreio)
 
 ## 2.4 Riscos e Mitigacoes
-- [ ] Riscos operacionais mapeados (rede, ODBC, indisponibilidade API)
-- [ ] Riscos de dados mapeados (campo obrigatorio, de-para invalido)
-- [ ] Mitigacoes e plano de contingencia definidos
-- [ ] Responsaveis por decisao em incidentes definidos
+- [x] Riscos operacionais mapeados (rede, ODBC, indisponibilidade API)
+- [x] Riscos de dados mapeados (campo obrigatorio, de-para invalido)
+- [x] Mitigacoes e plano de contingencia definidos
+- [x] Responsaveis por decisao em incidentes definidos
 
 ## 2.5 Governanca e Operacao
-- [ ] Dono funcional do processo definido
-- [ ] Janela de suporte e SLA definidos
-- [ ] Processo de mudanca aprovado (como alterar de-para, endpoint, credenciais)
-- [ ] Processo de validacao antes de ir para Producao definido
+- [x] Dono funcional do processo definido
+- [x] Janela de suporte e SLA definidos
+- [x] Processo de mudanca aprovado (como alterar de-para, endpoint, credenciais)
+- [x] Processo de validacao antes de ir para Producao definido
 
 ## 2.6 Evidencias para Apresentacao
-- [ ] Prints da interface (configuracao, monitoramento, lista de integracao)
-- [ ] Evidencia de execucao em Homologacao
-- [ ] Evidencia de execucao em Producao controlada
-- [ ] Evidencia de logs e rastreabilidade (antes/depois, sucesso/erro)
+- [x] Evidencia de execucao em Homologacao
+- [x] Evidencia de execucao em Producao controlada
+- [x] Evidencia de logs e rastreabilidade (antes/depois, sucesso/erro)
 
 ---
 
 ## 3. Documentacao Tecnica (Dev / QA / DevOps / Suporte)
 
 ## 3.1 Arquitetura Tecnica
-- [ ] Diagrama tecnico atualizado (componentes, responsabilidades)
-- [ ] Estrutura de repositorio explicada (`scripts`, `src`, `Interface`, `config`)
-- [ ] Dependencias e versoes criticas listadas (`Python`, `ODBC`, `PyInstaller`, libs)
-- [ ] Estrategia de configuracao centralizada explicada (`.env`, `clientes_api.json`)
+- [x] Diagrama tecnico atualizado (componentes, responsabilidades)
+- [x] Estrutura de repositorio explicada (`scripts`, `src`, `Interface`, `config`)
+- [x] Dependencias e versoes criticas listadas (`Python`, `ODBC`, `PyInstaller`, libs)
+- [x] Estrategia de configuracao centralizada explicada (`.env`, `clientes_api.json`)
 
 ## 3.2 Modelo de Dados e Contratos
 - [ ] Tabelas de integracao documentadas (`MotoristaCadastro`, `Afastamento`)
@@ -87,32 +85,32 @@ Use este arquivo como "controle mestre" de entrega documental.
 - [ ] De-para por endpoint documentado (origem -> destino, obrigatorio/opcional)
 
 ## 3.3 Instalacao e Setup de Ambiente
-- [ ] Pre-requisitos de servidor documentados (rede, porta, ODBC, permissao)
-- [ ] Checklist de conectividade SQL e API documentado
-- [ ] Processo de build de executaveis documentado (somente alvo necessario)
-- [ ] Estrutura de pastas alvo documentada (`C:\\Cadastrei\\...`)
-- [ ] Processo de deploy por copia documentado
+- [x] Pre-requisitos de servidor documentados (rede, porta, ODBC, permissao)
+- [x] Checklist de conectividade SQL e API documentado
+- [x] Processo de build de executaveis documentado (somente alvo necessario)
+- [x] Estrutura de pastas alvo documentada (`C:\\Cadastrei\\...`)
+- [x] Processo de deploy por copia documentado
 
 ## 3.4 Servicos Windows (NSSM)
 - [ ] Nomes de servico por finalidade e ambiente documentados
 - [ ] Parametros de instalacao documentados
 - [ ] Comandos de start/stop/restart/status documentados
 - [ ] Conta de execucao e permissoes documentadas
-- [ ] Estrategia de rollback documentada
+- [x] Estrategia de rollback documentada
 
 ## 3.5 Operacao e Monitoramento
-- [ ] Local e padrao de logs documentados
-- [ ] Eventos operacionais importantes documentados
-- [ ] Checklist diario de saude documentado
-- [ ] Alertas recomendados documentados (fila crescendo, erro recorrente, timeout)
-- [ ] Procedimento de triagem por tipo de erro documentado
+- [x] Local e padrao de logs documentados
+- [x] Eventos operacionais importantes documentados
+- [x] Checklist semanal de saude documentado
+- [x] Alertas recomendados documentados (fila crescendo, erro recorrente, timeout)
+- [x] Procedimento de triagem por tipo de erro documentado
 
 ## 3.6 Testes (Manual + Tecnico)
-- [ ] Casos de teste de motorista definidos (sucesso, erro, retries)
-- [ ] Casos de teste de afastamento definidos
-- [ ] Casos de teste de de-para definidos (campo faltante, padrao, transformacao)
-- [ ] Casos de teste de conectividade (SQL/API) definidos
-- [ ] Criterios de aprovacao para homologacao e producao definidos
+- [x] Casos de teste de motorista definidos (sucesso, erro, retries)
+- [x] Casos de teste de afastamento definidos
+- [x] Casos de teste de de-para definidos (campo faltante, padrao, transformacao)
+- [x] Casos de teste de conectividade (SQL/API) definidos
+- [x] Criterios de aprovacao para homologacao e producao definidos
 
 ## 3.7 Manutencao e Evolucao
 - [ ] Como adicionar novo endpoint documentado
@@ -132,35 +130,35 @@ Use este arquivo como "controle mestre" de entrega documental.
 ## 4. SQL Checklist (Banco e Operacao)
 
 ## 4.1 Estrutura e Integridade
-- [ ] Tabelas obrigatorias existem e estao no schema correto (`dbo`)
-- [ ] Colunas obrigatorias para integracao existem
-- [ ] Constraints/indices necessarios conferidos
-- [ ] Dicionarios (`EmpresaDict`, `SindicatoDict`) populados
+- [x] Tabelas obrigatorias existem e estao no schema correto (`dbo`)
+- [x] Colunas obrigatorias para integracao existem
+- [x] Constraints/indices necessarios conferidos
+- [x] Dicionarios (`EmpresaDict`, `SindicatoDict`) populados
 
 ## 4.2 Saude da Fila
-- [ ] Consulta de volume por `Status` validada
-- [ ] Itens com `ERRO` classificados por `UltimoErro`
-- [ ] Locks expirados revisados e liberados quando necessario
-- [ ] Processo de reprocessamento documentado e testado
+- [x] Consulta de volume por `Status` validada
+- [x] Itens com `ERRO` classificados por `UltimoErro`
+- [x] Locks expirados revisados e liberados quando necessario
+- [x] Processo de reprocessamento documentado e testado
 
 ## 4.3 Performance Basica
-- [ ] Tempo de captura e envio por lote medido
-- [ ] Batch size adequado validado por ambiente
-- [ ] Querys criticas revisadas com plano de execucao (quando necessario)
+- [x] Tempo de captura e envio por lote medido
+- [x] Batch size adequado validado por ambiente
+- [x] Querys criticas revisadas com plano de execucao (quando necessario)
 
 ---
 
 ## 5. Checklist de Go-Live (Producao)
 
-- [ ] Build final aprovado e versionado
-- [ ] Deploy realizado em servidor alvo
-- [ ] `.env` final validado em Producao
-- [ ] `clientes_api.json` final validado em Producao
-- [ ] Servicos API instalados e iniciados
-- [ ] Servicos de captura (motorista/afastamento) validados
-- [ ] Teste controlado (batch 1) executado com sucesso
-- [ ] Monitoramento de 30-60 minutos sem erro critico
-- [ ] Plano de rollback pronto e testado
+- [x] Build final aprovado e versionado
+- [x] Deploy realizado em servidor alvo
+- [x] `.env` final validado em Producao
+- [x] `clientes_api.json` final validado em Producao
+- [x] Servicos API instalados e iniciados
+- [x] Servicos de captura (motorista/afastamento) validados
+- [x] Teste controlado (batch 1) executado com sucesso
+- [x] Monitoramento de 30-60 minutos sem erro critico
+- [x] Plano de rollback pronto e testado
 - [ ] Aprovacao final de PO/Stakeholders registrada
 
 ---
@@ -194,11 +192,3 @@ docs/
     evidencias/
     diagramas/
 ```
-
----
-
-## 8. Proximo Passo Sugerido
-
-- [ ] Preencher este checklist com responsavel e prazo por item
-- [ ] Criar os 8 documentos da estrutura recomendada
-- [ ] Agendar revisao tecnica + revisao executiva separadas

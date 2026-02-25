@@ -4,10 +4,10 @@
 
 | Campo | Valor |
 |---|---|
-| Versao | |
-| Data | |
-| Autor | |
-| Revisores | |
+| Versao | v1.0 |
+| Data | 25/02/2026 |
+| Autor | João Lucas |
+| Revisores | Marcelo Harley e Diego Ferreira|
 
 ## 2. Contexto Tecnico
 

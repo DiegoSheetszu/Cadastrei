@@ -2,7 +2,7 @@
 
 ## 1. Objetivo
 
-Definir rotina operacional diaria para manter os servicos saudaveis, detectar falhas cedo e reduzir MTTR.
+Definir rotina operacional semanal para manter os servicos saudaveis, detectar falhas cedo e reduzir MTTR.
 
 ## 2. Inventario de Servicos
 
@@ -10,8 +10,8 @@ Definir rotina operacional diaria para manter os servicos saudaveis, detectar fa
 |---|---|---|
 | Sync Motoristas | CadastreiMotoristasHom | CadastreiMotoristasProd |
 | Sync Afastamentos | CadastreiAfastamentosHom | CadastreiAfastamentosProd |
-| API Motoristas | CadastreiApiMotoristasHom / unico | CadastreiApiMotoristasProd / unico |
-| API Afastamentos | CadastreiApiAfastamentosHom / unico | CadastreiApiAfastamentosProd / unico |
+| API Motoristas | (Ambiente é definido pelo Sync e configuração na interface)
+| API Afastamentos | (Ambiente é definido pelo Sync e configuração na interface)
 
 ## 3. Logs Operacionais
 
@@ -26,7 +26,7 @@ Definir rotina operacional diaria para manter os servicos saudaveis, detectar fa
 - `*_nssm.out.log`
 - `*_nssm.err.log`
 
-## 4. Checklist Diario
+## 4. Checklist Semanal
 
 - [ ] Todos os servicos esperados estao `RUNNING`.
 - [ ] Nao ha crescimento anormal de erros no log.
@@ -36,29 +36,22 @@ Definir rotina operacional diaria para manter os servicos saudaveis, detectar fa
 
 ## 5. Indicadores Operacionais
 
-| Indicador | Alvo | Fonte |
-|---|---|---|
-| `ERRO` por hora | | Banco + logs |
-| Tempo medio por ciclo | | Logs |
-| Itens pendentes antigos | | Banco |
-| Tentativas medias por item | | Banco |
+| Indicador | Fonte |
+|---|---|
+| `ERRO` por hora | Banco + logs |
+| Tempo medio por ciclo | Logs |
+| Itens pendentes antigos | Banco |
+| Tentativas medias por item | Banco |
 
-## 6. Alarmes Recomendados
 
-- [ ] Servico parado.
-- [ ] Falha de conexao com banco/API repetitiva.
-- [ ] Fila `PENDENTE` acima de limite.
-- [ ] Fila `ERRO` acima de limite.
-- [ ] Tempo de ciclo acima de limite.
-
-## 7. Tarefas Semanais
+## 6. Tarefas Mensais
 
 - [ ] Revisar configuracoes de de-para ativas.
 - [ ] Revisar crescimento de logs e politica de limpeza.
 - [ ] Revisar erros mais frequentes e plano de melhoria.
 - [ ] Revisar capacidade de batch/timeout.
 
-## 8. Evidencias de Operacao
+## 7. Evidencias de Operacao
 
 - [ ] Captura de status dos servicos.
 - [ ] Amostra de logs (inicio, ciclo, erro, recuperacao).
